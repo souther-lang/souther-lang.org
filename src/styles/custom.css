@@ -1,0 +1,54 @@
+:root {
+	--sl-color-accent-low: #f3ead4;
+	--sl-color-accent: #9c752a;
+	--sl-color-accent-high: #4f3810;
+	--sl-color-text-accent: #755514;
+}
+
+:root[data-theme='dark'] {
+	--sl-color-accent-low: #36280f;
+	--sl-color-accent: #d1aa5c;
+	--sl-color-accent-high: #f3e5c6;
+	--sl-color-text-accent: #e5bf78;
+}
+
+.hero {
+	align-items: center;
+	padding-block: 2.5rem 3rem;
+}
+
+.hero .hero-html {
+	max-width: 44rem;
+}
+
+.hero img {
+	max-width: min(19rem, 55vw);
+	filter: drop-shadow(0 0.6rem 1.6rem rgb(0 0 0 / 12%));
+}
+
+.sl-markdown-content > :is(h2, h3) {
+	letter-spacing: -0.025em;
+}
+
+.sl-markdown-content > h2 {
+	margin-top: 4rem;
+}
+
+.sl-markdown-content pre {
+	border: 1px solid var(--sl-color-gray-5);
+	box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 8%);
+}
+
+.card {
+	border-color: var(--sl-color-gray-5);
+	background: linear-gradient(145deg, var(--sl-color-bg-nav), var(--sl-color-bg));
+}
+
+.closing-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.6rem;
+	align-items: center;
+	margin-top: 2rem;
+	font-weight: 600;
+}

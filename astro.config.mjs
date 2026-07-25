@@ -8,8 +8,9 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Souther',
-			description: 'A programming language for the future.',
+			description: 'Make business rules executable.',
 			defaultLocale: 'ja',
+			customCss: ['./src/styles/custom.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/souther-lang' }],
 		}),
 	],

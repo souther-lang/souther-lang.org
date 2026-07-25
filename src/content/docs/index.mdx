@@ -1,7 +1,86 @@
 ---
 title: Souther
-description: Souther programming language.
+description: Make business rules executable.
 template: splash
 hero:
-  tagline: A programming language for the future.
+  tagline: Make business rules executable.
+  image:
+    file: ../../assets/souther.png
+    alt: Souther logo
+  actions:
+    - text: Explore Souther on GitHub
+      link: https://github.com/souther-lang/souther
+      icon: external
+    - text: Read the specification
+      link: https://github.com/souther-lang/souther/blob/main/specification.adoc
+      icon: external
+      variant: minimal
 ---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Business software changes constantly. The rules that define it should not be
+scattered across comments, constructors, exception handling, and service calls.
+
+Souther is a small JVM language for describing domain data, its constraints, and
+the transitions it can make. It generates types and behaviors that Java can use,
+so the model stays explicit all the way to the application boundary.
+
+```text
+data Amount = Int
+    invariant value >= 0
+
+data DraftRequest = { plannedCost: Amount }
+data Submitted = { ...DraftRequest, submittedAt: String }
+data Rejected = { reason: String }
+
+behavior submit : (request: DraftRequest, submittedAt: String) -> Submitted | Rejected
+    constructs Submitted, Rejected
+
+let submit (request, submittedAt) = {
+    require request.plannedCost.value <= 100000 else Rejected { reason = "high_cost" }
+    Submitted { ...request, submittedAt = submittedAt }
+}
+```
+
+## Model the rule, not its accidental implementation
+
+<CardGrid stagger>
+	<Card title="Invalid values have nowhere to hide" icon="document">
+		Declare an `invariant` once. Souther checks it whenever the value is constructed
+		by a decoder or a behavior, and generated constructors are not public to Java.
+	</Card>
+	<Card title="Outcomes are ordinary domain data" icon="branch">
+		A behavior can return `Submitted | Rejected`. Rejection is a named business
+		outcome—not an exception and not a special error wrapper.
+	</Card>
+	<Card title="Effects stay at the boundary" icon="shield">
+		Souther does not call databases, clocks, or HTTP services. Java injects those
+		dependencies explicitly, keeping domain computation independent of the outside world.
+	</Card>
+</CardGrid>
+
+## A narrow language, a firm boundary
+
+Souther has immutable data, algebraic alternatives, constraints, pattern matching,
+and behavior composition. It intentionally omits `null`, mutable state, exceptions,
+and arbitrary JVM calls. The result is a domain model whose construction paths,
+business outcomes, and dependencies remain visible.
+
+Souther compiles to JVM class files. Generated data and behavior types are designed
+to be used from Java, while Java remains responsible for infrastructure and integration.
+
+## Built for the part of software that must stay true
+
+Use Souther when a rule deserves more than a comment: prices that cannot be negative,
+requests that must follow a state transition, or decisions whose outcomes should be
+understood by the rest of the system.
+
+The compiler, runtime, CLI, language server, and VS Code extension are open source.
+Souther requires JDK 25 to build; generated applications run on Java 21 and later.
+
+<p className="closing-links">
+	<a href="https://github.com/souther-lang/souther">View the source on GitHub</a>
+	<span aria-hidden="true">·</span>
+	<a href="https://github.com/souther-lang/souther/tree/main/examples/businesstrip">See the business trip example</a>
+</p>
