@@ -1,0 +1,21 @@
+---
+interface Props {
+	/** Heading shown above the prose column. */
+	title: string;
+	/** Put the code column first on wide screens. Narrow screens always read prose first. */
+	reverse?: boolean;
+}
+
+const { title, reverse = false } = Astro.props;
+---
+
+<section class:list={['feature-row', { reverse }]}>
+	<div class="feature-prose">
+		<h3>{title}</h3>
+		<slot name="prose" />
+	</div>
+	{/* Machine translation must not rewrite identifiers such as `data Amount`. */}
+	<div class="feature-code notranslate" translate="no">
+		<slot name="code" />
+	</div>
+</section>

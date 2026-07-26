@@ -1,0 +1,105 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+
+// Fills Starlight's language-selector slot, which is empty on a single-locale site.
+// The site is written in English only; other languages come from Google's machine
+// translation running in the reader's browser. Nothing is translated at build time.
+//
+// The widget's own dropdown is an iframe that does not fit the header, so the select
+// below is ours. Google's engine reads the target language from the `googtrans`
+// cookie, which is all the select writes before reloading.
+const languages = [
+	{ code: 'en', label: 'English' },
+	{ code: 'ja', label: '日本語' },
+	{ code: 'zh-CN', label: '简体中文' },
+	{ code: 'ko', label: '한국어' },
+	{ code: 'es', label: 'Español' },
+	{ code: 'fr', label: 'Français' },
+	{ code: 'de', label: 'Deutsch' },
+	{ code: 'pt', label: 'Português' },
+	{ code: 'ru', label: 'Русский' },
+];
+---
+
+<souther-translate-select class="translate-select notranslate" translate="no">
+	<label>
+		<span class="sr-only">Machine-translate this page</span>
+		<Icon name="translate" class="icon label-icon" />
+		<select autocomplete="off">
+			{languages.map(({ code, label }) => <option value={code}>{label}</option>)}
+		</select>
+		<Icon name="down-caret" class="icon caret" />
+	</label>
+</souther-translate-select>
+
+<div id="google_translate_element" aria-hidden="true"></div>
+
+<script is:inline>
+	(function () {
+		var SOURCE = 'en';
+
+		function readTarget() {
+			var match = document.cookie.match(/(?:^|;\s*)googtrans=([^;]*)/);
+			if (!match) return SOURCE;
+			return decodeURIComponent(match[1]).split('/')[2] || SOURCE;
+		}
+
+		function writeCookie(value, expires) {
+			var suffix = expires ? '; expires=Thu, 01 Jan 1970 00:00:00 GMT' : '';
+			var base = 'googtrans=' + value + '; path=/' + suffix;
+			document.cookie = base;
+			// Production serves from a domain; localhost has no dot and takes the host-only cookie.
+			if (document.location.hostname.indexOf('.') !== -1) {
+				document.cookie = base + '; domain=' + document.location.hostname;
+				document.cookie = base + '; domain=.' + document.location.hostname;
+			}
+		}
+
+		function setTarget(lang) {
+			if (lang === SOURCE) {
+				writeCookie('', true);
+			} else {
+				writeCookie('/' + SOURCE + '/' + lang, false);
+			}
+			document.location.reload();
+		}
+
+		// Identifiers, keywords and file names must survive translation. The landing page
+		// marks its own code columns at build time; this covers the documentation pages.
+		function markCodeAsUntranslatable() {
+			document.querySelectorAll('pre, code, kbd, samp').forEach(function (el) {
+				el.setAttribute('translate', 'no');
+				el.classList.add('notranslate');
+			});
+		}
+
+		markCodeAsUntranslatable();
+		document.addEventListener('DOMContentLoaded', markCodeAsUntranslatable);
+
+		window.googleTranslateElementInit = function () {
+			markCodeAsUntranslatable();
+			new window.google.translate.TranslateElement(
+				{ pageLanguage: SOURCE, autoDisplay: false },
+				'google_translate_element'
+			);
+		};
+
+		class SoutherTranslateSelect extends HTMLElement {
+			constructor() {
+				super();
+				var select = this.querySelector('select');
+				if (!select) return;
+				select.value = readTarget();
+				select.addEventListener('change', function (event) {
+					setTarget(event.currentTarget.value);
+				});
+			}
+		}
+		customElements.define('souther-translate-select', SoutherTranslateSelect);
+	})();
+</script>
+
+<script
+	is:inline
+	async
+	src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>

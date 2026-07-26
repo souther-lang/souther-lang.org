@@ -3,10 +3,12 @@ title: Souther
 description: Make business rules executable.
 template: splash
 hero:
-  tagline: Make business rules executable.
-  image:
-    file: ../../assets/souther.png
-    alt: Souther logo
+  tagline: |
+    <p class="motto">A small JVM language for <strong>business rules that stay true</strong>.</p>
+    <p>Business software changes constantly. The rules that define it should not be scattered
+    across comments, constructors, exception handling and service calls. Souther describes
+    domain data, its constraints and the transitions it can make, and generates types and
+    behaviors that Java uses — so the model stays explicit all the way to the application boundary.</p>
   actions:
     - text: Explore Souther on GitHub
       link: https://github.com/souther-lang/souther
@@ -15,69 +17,502 @@ hero:
       link: https://github.com/souther-lang/souther/blob/main/specification.adoc
       icon: external
       variant: minimal
+heroCode: |
+  data Amount = Int
+      invariant value >= 0
+
+  data DraftRequest = { plannedCost: Amount }
+  data Submitted = { ...DraftRequest, submittedAt: String }
+  data Rejected = { reason: String }
+
+  behavior submit : (request: DraftRequest, submittedAt: String)
+      -> Submitted | Rejected
+      constructs Submitted, Rejected
+
+  let submit (request, submittedAt) = {
+      require request.plannedCost.value <= 100000
+          else Rejected { reason = "high_cost" }
+      Submitted { ...request, submittedAt = submittedAt }
+  }
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
-
-Business software changes constantly. The rules that define it should not be
-scattered across comments, constructors, exception handling, and service calls.
-
-Souther is a small JVM language for describing domain data, its constraints, and
-the transitions it can make. It generates types and behaviors that Java can use,
-so the model stays explicit all the way to the application boundary.
-
-```text
-data Amount = Int
-    invariant value >= 0
-
-data DraftRequest = { plannedCost: Amount }
-data Submitted = { ...DraftRequest, submittedAt: String }
-data Rejected = { reason: String }
-
-behavior submit : (request: DraftRequest, submittedAt: String) -> Submitted | Rejected
-    constructs Submitted, Rejected
-
-let submit (request, submittedAt) = {
-    require request.plannedCost.value <= 100000 else Rejected { reason = "high_cost" }
-    Submitted { ...request, submittedAt = submittedAt }
-}
-```
+import FeatureRow from '../../components/FeatureRow.astro';
 
 ## Model the rule, not its accidental implementation
 
-<CardGrid stagger>
-	<Card title="Invalid values have nowhere to hide" icon="document">
-		Declare an `invariant` once. Souther checks it whenever the value is constructed
-		by a decoder or a behavior, and generated constructors are not public to Java.
-	</Card>
-	<Card title="Outcomes are ordinary domain data" icon="branch">
-		A behavior can return `Submitted | Rejected`. Rejection is a named business
-		outcome—not an exception and not a special error wrapper.
-	</Card>
-	<Card title="Effects stay at the boundary" icon="shield">
-		Souther does not call databases, clocks, or HTTP services. Java injects those
-		dependencies explicitly, keeping domain computation independent of the outside world.
-	</Card>
-</CardGrid>
+<FeatureRow title="Invalid values have nowhere to hide">
+<Fragment slot="prose">
+
+A constraint is declared next to the type it belongs to, once. Souther checks it wherever the
+value is constructed — a derived decoder at the boundary, or a behavior inside the domain.
+
+The generated constructor is not public to Java, so no code path skips the check. A value of type
+`Balance` that exists is a value that satisfied `value >= 0`.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data AccountNo = String
+    invariant String.length(value) > 0
+
+// The withdrawal amount is non-negative.
+data Amount = Int
+    invariant value >= 0
+
+// A balance never goes below zero.
+data Balance = Int
+    invariant value >= 0
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="States share their fields instead of repeating them" reverse>
+<Fragment slot="prose">
+
+`Draft` and `Submitted` are distinct types. A behavior that takes a `Submitted` cannot be handed a
+`Draft`, and the difference between the two is the one field that actually differs.
+
+They still share a single definition of what a trip request is. Adding a field to
+`TripRequestFields` reaches both, and a spread that collides with an existing field name is a
+compile error rather than a silent override.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data TripRequestFields =
+    { requester: EmployeeId
+    , plannedCost: Amount
+    }
+
+data Draft =
+    { ...TripRequestFields
+    }
+
+data Submitted =
+    { ...TripRequestFields
+    , submittedAt: String
+    }
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="A rejection is domain data, not an exception">
+<Fragment slot="prose">
+
+Everything a withdrawal can end up as is listed in its type. `InsufficientFunds` is ordinary data:
+no `Result` wrapper, no error base class, no exception, no marker distinguishing it from the
+success case.
+
+Which of these is a "failure" is not decided here. It is decided by what the next stage in a
+pipeline accepts — so the same case can be a failure in one composition and a normal outcome in
+another.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data Withdrawn =
+    { account: AccountNo
+    , newBalance: Balance
+    }
+data InsufficientFunds = { shortfall: Int }
+data NoAccount
+
+behavior withdraw : (request: WithdrawRequest)
+    -> Withdrawn | InsufficientFunds | NoAccount
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Who is allowed to create this value" reverse>
+<Fragment slot="prose">
+
+A behavior may only build the data it declares in `constructs`. Building something it did not
+declare is `E1002`; declaring something it never builds is `E1006`.
+
+Both directions are checked, so the clause reads as an accurate account of what this behavior
+brings into existence and what it merely passes through. Combined with non-public constructors,
+the set of places a `Submitted` can come from is a list you can read.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+behavior submit : (request: Draft, submittedAt: String)
+    -> Submitted | Rejected
+    constructs Submitted, Rejected
+```
+
+```text
+error E1002:
+Behavior `changeEmail` constructs `Member`
+but does not declare `constructs Member`.
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="A guard names the outcome it produces">
+<Fragment slot="prose">
+
+`require` reads as the precondition it is, and says what the behavior becomes when it does not
+hold. There is no early-return convention to learn and no exception to catch.
+
+It also carries information forward. Below the `require`, the compiler knows the balance covers the
+amount, and that is what discharges `Balance`'s `invariant value >= 0` on the next line — the
+construction is proved safe rather than checked again at run time.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+let withdraw (request, currentBalance, updateBalance) =
+    match currentBalance(request.account) with
+        | NoAccount          -> NoAccount
+        | Balance as current -> {
+            require current.value >= request.amount.value
+                else InsufficientFunds {
+                    shortfall = request.amount.value - current.value
+                }
+            updateBalance(
+                request.account,
+                Balance(current.value - request.amount.value))
+          }
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Illegal states are not representable" reverse>
+<Fragment slot="prose">
+
+An address is either activated or not, and notifications may only go to an activated one. Written
+as a boolean flag, that rule lives in whoever remembers to check it. Written as a sum, it lives in
+the argument type of `notify`, and an unactivated address cannot be passed at all.
+
+`match` is exhaustive. Add a third case to `Email` and every match over it stops compiling with
+`E1201`, naming the case you have not handled.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data Activated = EmailAddress
+data Unactivated = EmailAddress
+data Email = Activated | Unactivated
+
+behavior notify : (to: Activated, subject: String) -> Sent
+    constructs Sent
+
+// Nested newtypes are destructured in one step.
+let addressOf (m: Email) =
+    match m with
+        | Activated(EmailAddress(s))   -> s
+        | Unactivated(EmailAddress(s)) -> s
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="There is no null">
+<Fragment slot="prose">
+
+Absence is a field written with `?`, opened with `Option`. Writing `null` is `E1301`, not a runtime
+surprise.
+
+Recursion over an optional field is how a self-referential model is walked: `manager` is
+`Employee?`, so the chain terminates at the person who has none. The compiler accepts the recursion
+because each step goes strictly inward.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data Employee =
+    { id: EmployeeId
+    , manager: Employee?
+    }
+
+// How many approval levels sit above this person.
+let approvalDepth (e: Employee): Int =
+    e.manager
+        |> Option.map(m -> approvalDepth(m) + 1)
+        |> Option.withDefault(0)
+```
+
+```text
+error E1301:
+`null` is not part of the language. Use an optional field with `?`.
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Examples the compiler evaluates" reverse>
+<Fragment slot="prose">
+
+An `example` sits next to the behavior it describes and is evaluated during compilation. If the
+behavior stops agreeing with it, the build fails. There is no test runner to invoke and no suite to
+forget.
+
+They are written where the rule is, so the threshold that decides `PricedCart` from `EmptyCart` is
+readable beside the code that implements it — the documentation and the check are the same text.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+example quote
+    | "all lines valid -> a priced cart" :
+        (Cart { open = true, items =
+            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ] })
+        -> PricedCart { items =
+            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ]
+            , total = 300, highValue = false }
+    | "a closed cart -> empty" :
+        (Cart { open = false, items =
+            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ] })
+        -> EmptyCart
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Serialization is derived, not written">
+<Fragment slot="prose">
+
+From the data declaration Souther derives decoders for bare maps, JSON and database rows, plus the
+matching encoder. You do not write them, and they cannot drift from the model.
+
+The invariant runs during decode, so malformed input from outside the boundary becomes a `Result`
+failure with the path that broke — not a bad value that entered the domain and surfaced three
+layers later.
+
+</Fragment>
+<Fragment slot="code">
+
+```java
+// generated for an exposed data
+public static Decoder<Map<String,Object>, Member> decoder()
+public static Decoder<JsonNode, Member>          jsonDecoder()
+public static Decoder<Record, Member>            recordDecoder()
+public static Encoder<Member, Map<String,Object>> encoder()
+
+// a newtype encodes to a bare scalar
+public static Encoder<MemberId, String> encoder()
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Dependencies on the outside world are declared, not implemented" reverse>
+<Fragment slot="prose">
+
+A `behavior` with no `let` has no implementation in Souther. Java supplies one. `requires` names
+every injected dependency a behavior uses, and over-declaring is `E1603` just as under-declaring is
+an error.
+
+So which functions touch the database is read from the declaration rather than inferred from a
+package name. This is the part usually left to a layering convention; here it is a clause the
+compiler checks.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+// injected: implementation comes from Java
+behavior currentBalance : (account: AccountNo)
+    -> Balance | NoAccount
+
+behavior updateBalance : (account: AccountNo, newBalance: Balance)
+    -> Withdrawn
+    constructs Withdrawn
+
+behavior withdraw : (request: WithdrawRequest)
+    -> Withdrawn | InsufficientFunds | NoAccount
+    requires currentBalance, updateBalance
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Composition routes by type">
+<Fragment slot="prose">
+
+`>->` passes a stage only the cases the next stage can accept. Everything else leaves the mainline
+and is collected into the composition's output, skipping the remaining stages.
+
+Nothing is marked as an error. Which case departs is decided by what the next stage takes, so the
+same sum composes one way here and another way there. The compiler folds the result and tells you
+the output type of the whole pipeline.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+behavior lookupAndFormat = findMember >-> formatMember
+```
+
+```text
+f : A -> B | R     g : B -> C          f >-> g : A -> C | R
+f : A -> B | R     g : B -> C | S      f >-> g : A -> C | S | R
+f : A -> B1 | B2   g : B1 | B2 -> C    f >-> g : A -> C
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="Java receives a shape it can exhaust" reverse>
+<Fragment slot="prose">
+
+An output such as `-> Member | NoMember | CorruptRecord` becomes a sealed interface, so Java
+switches over it and the compiler catches a missing case.
+
+The Java implementation of an injected behavior extends a generated abstract class and builds
+failure cases through inherited `protected` factories. The data constructor stays non-public, so
+Java can read a `Member` it has no way to forge — and a platform failure such as a dropped
+connection stays an exception, distinct from a business outcome.
+
+</Fragment>
+<Fragment slot="code">
+
+```java
+public final class JdbcFindMember extends FindMember {
+    @Override
+    public FindMemberResult apply(MemberId id) {
+        // ...
+        return switch (Member.decoder().decode(raw, Path.ROOT)) {
+            case Ok<Member> ok   -> ok.value();
+            case Err<Member> err -> CorruptRecord();  // inherited factory
+        };
+    }
+}
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="The business speaks its own language, and so can the model">
+<Fragment slot="prose">
+
+Identifiers are Unicode. When the rule is discussed in Japanese, the type can be named 金額 and the
+behavior 提出する; the backend generates legal Java identifiers underneath.
+
+The point is not the character set. It is that the term in the rulebook and the term in the type
+system are the same string, so there is no glossary mapping 予定費用 to `plannedCost` for someone to
+get wrong.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+data 金額 = Int
+    invariant value >= 0
+
+data 却下 = { 理由: String }
+
+behavior 提出する : (申請: 申請準備中, 提出日時: String)
+    -> 提出済み | 却下
+    constructs 提出済み, 却下
+
+let 提出する (申請, 提出日時) = {
+    require 申請.予定費用.value <= 100000
+        else 却下 { 理由 = "high_cost" }
+    提出済み { ...申請, 提出日時 = 提出日時 }
+}
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="The domain cannot reach the outside world" reverse>
+<Fragment slot="prose">
+
+Not "should not" — cannot. There is no syntax for reading a clock, opening a socket or mutating a
+field, and calling an arbitrary JVM method is `E1401`.
+
+Everything that touches the world arrives as an injected behavior named in `requires`. A domain
+computation therefore depends on its inputs and nothing else, which is what makes an `example`
+evaluable at compile time in the first place.
+
+</Fragment>
+<Fragment slot="code">
+
+```text
+Absent from the language:
+
+  mutable variables      files
+  field assignment       network
+  static mutable state   threads
+  random                 exceptions
+  current time           reflection
+  environment variables  arbitrary JVM calls
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="The failures are designed">
+<Fragment slot="prose">
+
+Each compile error has a stable code that identifies it independently of language, with the prose
+rendered in the locale you select. `--format json` emits the same diagnostic as structured data for
+tooling.
+
+The catalogue is part of the specification rather than a by-product of the implementation. `E1002`
+and `E1006` are what keep `constructs` honest; `E1603` does the same for `requires`.
+
+</Fragment>
+<Fragment slot="code">
+
+```text
+error E1001:
+Data `Email` cannot be constructed directly.
+Use `Email.decoder` or a behavior declared with `constructs Email`.
+```
+
+```text
+error E1201:
+Non-exhaustive match for data `TripRequest`.
+Missing case: PreApproved
+```
+
+```text
+error E1302:
+Exceptions are not supported.
+Return a failure case in the output sum.
+```
+
+</Fragment>
+</FeatureRow>
 
 ## A narrow language, a firm boundary
 
-Souther has immutable data, algebraic alternatives, constraints, pattern matching,
-and behavior composition. It intentionally omits `null`, mutable state, exceptions,
-and arbitrary JVM calls. The result is a domain model whose construction paths,
-business outcomes, and dependencies remain visible.
+Souther has immutable data, algebraic alternatives, constraints, pattern matching and behavior
+composition. It intentionally omits `null`, mutable state, exceptions and arbitrary JVM calls. The
+result is a domain model whose construction paths, business outcomes and dependencies remain
+visible.
 
-Souther compiles to JVM class files. Generated data and behavior types are designed
-to be used from Java, while Java remains responsible for infrastructure and integration.
+Souther compiles to JVM class files. Generated data and behavior types are designed to be used from
+Java, while Java remains responsible for infrastructure and integration. The class files target
+Java 21; building the compiler requires JDK 25.
+
+## Tooling
+
+The compiler, runtime, CLI, language server and VS Code extension are open source. The extension
+gives semantic highlighting, hover, go-to-definition and inline diagnostics over the same
+diagnostics the CLI emits, and `souther-fmt` formats sources to a single layout.
 
 ## Built for the part of software that must stay true
 
-Use Souther when a rule deserves more than a comment: prices that cannot be negative,
-requests that must follow a state transition, or decisions whose outcomes should be
-understood by the rest of the system.
-
-The compiler, runtime, CLI, language server, and VS Code extension are open source.
-Souther requires JDK 25 to build; generated applications run on Java 21 and later.
+Use Souther when a rule deserves more than a comment: prices that cannot be negative, requests that
+must follow a state transition, or decisions whose outcomes should be understood by the rest of the
+system.
 
 <p className="closing-links">
 	<a href="https://github.com/souther-lang/souther">View the source on GitHub</a>
