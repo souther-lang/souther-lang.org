@@ -22,6 +22,11 @@ export default defineConfig({
 				dark: './src/assets/souther-dark.png',
 				alt: 'Souther',
 			},
+			favicon: '/favicon.ico',
+			head: [
+				{ tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/icon-192.png' } },
+				{ tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+			],
 			defaultLocale: 'en',
 			customCss: ['./src/styles/custom.css'],
 			expressiveCode: {
