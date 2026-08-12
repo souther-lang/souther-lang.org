@@ -8,6 +8,12 @@ import { Icon } from '@astrojs/starlight/components';
 // The widget's own dropdown is an iframe that does not fit the header, so the select
 // below is ours. Google's engine reads the target language from the `googtrans`
 // cookie, which is all the select writes before reloading.
+//
+// Starlight renders this component twice on pages with a sidebar — once in the
+// header and once in the mobile menu. Both selects work, but a second translator
+// on the same page makes Google's script throw and nothing gets translated, so
+// the widget container and Google's script are created by the first copy of the
+// script below and the second one stops at the guard.
 const languages = [
 	{ code: 'en', label: 'English' },
 	{ code: 'ja', label: '日本語' },
@@ -32,10 +38,11 @@ const languages = [
 	</label>
 </souther-translate-select>
 
-<div id="google_translate_element" aria-hidden="true"></div>
-
 <script is:inline>
 	(function () {
+		if (window.southerTranslateReady) return;
+		window.southerTranslateReady = true;
+
 		var SOURCE = 'en';
 
 		function readTarget() {
@@ -73,11 +80,61 @@ const languages = [
 			});
 		}
 
-		markCodeAsUntranslatable();
-		document.addEventListener('DOMContentLoaded', markCodeAsUntranslatable);
+		// The language name is a proper noun, and every target language turns it into
+		// something else. Google only leaves a word alone when its own element says so,
+		// so each occurrence in the prose, the headings and the sidebar gets wrapped.
+		var BRAND = /Souther/g;
+		var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, PRE: 1, CODE: 1, KBD: 1, SAMP: 1 };
+
+		function markBrandAsUntranslatable() {
+			var root = document.body || document.documentElement;
+			var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+				acceptNode: function (node) {
+					if (node.nodeValue.indexOf('Souther') === -1) return NodeFilter.FILTER_REJECT;
+					var parent = node.parentElement;
+					if (!parent || SKIP_TAGS[parent.tagName]) return NodeFilter.FILTER_REJECT;
+					// Already covered, either by an earlier pass or by markup we wrote ourselves.
+					if (parent.closest('.notranslate, [translate="no"]')) return NodeFilter.FILTER_REJECT;
+					return NodeFilter.FILTER_ACCEPT;
+				},
+			});
+
+			// Collect first: replacing a node while the walker is on it ends the walk.
+			var nodes = [];
+			while (walker.nextNode()) nodes.push(walker.currentNode);
+
+			nodes.forEach(function (node) {
+				var text = node.nodeValue;
+				var fragment = document.createDocumentFragment();
+				var index = 0;
+				var match;
+				BRAND.lastIndex = 0;
+				while ((match = BRAND.exec(text)) !== null) {
+					if (match.index > index) {
+						fragment.appendChild(document.createTextNode(text.slice(index, match.index)));
+					}
+					var span = document.createElement('span');
+					span.className = 'notranslate';
+					span.setAttribute('translate', 'no');
+					span.textContent = match[0];
+					fragment.appendChild(span);
+					index = match.index + match[0].length;
+				}
+				if (index < text.length) fragment.appendChild(document.createTextNode(text.slice(index)));
+				node.parentNode.replaceChild(fragment, node);
+			});
+		}
+
+		function markUntranslatable() {
+			markCodeAsUntranslatable();
+			markBrandAsUntranslatable();
+		}
+
+		markUntranslatable();
+		document.addEventListener('DOMContentLoaded', markUntranslatable);
 
 		window.googleTranslateElementInit = function () {
-			markCodeAsUntranslatable();
+			markUntranslatable();
 			new window.google.translate.TranslateElement(
 				{ pageLanguage: SOURCE, autoDisplay: false },
 				'google_translate_element'
@@ -85,10 +142,16 @@ const languages = [
 		};
 
 		class SoutherTranslateSelect extends HTMLElement {
-			constructor() {
-				super();
+			connectedCallback() {
 				var select = this.querySelector('select');
-				if (!select) return;
+				if (!select) {
+					// The copy in the mobile menu comes after this script, so the parser
+					// upgrades it before it has read the options. Wire it up once it has.
+					document.addEventListener('DOMContentLoaded', this.connectedCallback.bind(this), { once: true });
+					return;
+				}
+				if (this.wired) return;
+				this.wired = true;
 				select.value = readTarget();
 				select.addEventListener('change', function (event) {
 					setTarget(event.currentTarget.value);
@@ -96,10 +159,15 @@ const languages = [
 			}
 		}
 		customElements.define('souther-translate-select', SoutherTranslateSelect);
+
+		var container = document.createElement('div');
+		container.id = 'google_translate_element';
+		container.setAttribute('aria-hidden', 'true');
+		document.body.appendChild(container);
+
+		var loader = document.createElement('script');
+		loader.async = true;
+		loader.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+		document.body.appendChild(loader);
 	})();
 </script>
-
-<script
-	is:inline
-	async
-	src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>

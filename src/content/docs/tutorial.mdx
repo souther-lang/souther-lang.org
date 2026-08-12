@@ -1,0 +1,670 @@
+---
+title: Tutorial
+description: A hands-on introduction to Souther through an executable business-trip approval model.
+---
+
+In this tutorial, you will build a domain model for a business trip expense application using Souther. You begin by modeling record fields and the core operations: submission, approval, and settlement. By the end, your types and behaviors will express which operations are valid in each state, why approval is required, what is reimbursed, and how invalid domain requests are rejected.
+
+You do not build the entire model at once. First, you represent the current fields and operations as `data` and `behavior`. Next, you write scenarios that reflect real business situations and expected outcomes as test examples. Whenever you encounter missing test cases or gaps identified in the `souther examples` report, you refine your types, states, and behaviors. Through this iterative process, business rules evolve into a structured model.
+
+In this tutorial, we call this approach Example-Driven Domain Modeling. Like BDD, it validates business logic through concrete scenarios, but its goal extends beyond agreeing on UI behavior. Through test cases, you discover and verify the types, states, and operations of the domain model itself.
+
+This tutorial covers the happy path from submission to final approval. Rejections and send-backs are omitted here. Once you complete the tutorial, you can compare your model with the full version in `businesstrip/src/main/souther/businesstrip.sou`.
+
+## Before You Begin
+
+This document does not provide a complete file for each section. Code blocks show only the code to add or replace in the `businesstrip.sou` file you built through the previous section. Unless noted otherwise, keep existing definitions, `let` bindings, and `example` blocks intact. Use the Update summary at the start of each section to confirm what to add, replace, or remove.
+
+As a result, copying and pasting a single isolated code block will not work. Follow these steps for each section:
+
+1. Read the "What You Will Learn" and "Update" sections, then edit your current `businesstrip.sou`.
+2. Run `souther examples businesstrip.sou` while keeping the test cases added in that section.
+3. Compare the generated report with the report shown in the text. Line and column numbers may vary based on file length.
+
+The goal of this tutorial is the happy path from submission to final approval. Even if the report shows `adequacy: satisfied` along the way, it only means the model rules and test cases written up to that point are consistent. It does not mean the entire business domain is fully implemented.
+
+## <span translate="no">Souther</span> Basics
+
+Souther is a language for defining data structures and functions that implement decision logic in the same file. In this tutorial, you define the structure of a business trip application and operations such as submission and approval in `businesstrip.sou`.
+
+Here are the first six language constructs:
+
+| Syntax | Meaning in This Tutorial |
+| --- | --- |
+| `data` | Declares a type. For example, `data Amount = Int` names `Int` as an `Amount`. `A \| B` represents the type of A or B. |
+| `Option<Type>` | Represents an optional value. In the initial model, it represents fields that have not yet been recorded. In later sections, you split types by state to reduce `Option`. |
+| `behavior` | Declares input and output contracts for domain operations. For example, `(app: Draft) -> Submitted` represents an operation that takes a draft application and returns a submitted application. |
+| `constructs` | Declares the `data` types that a behavior implementation is permitted to instantiate. If a behavior calls another `let`, include values instantiated within that nested call as well. |
+| `let` | Binds a name to a value or provides a behavior implementation. `let submitTrip (...) = ...` provides decision logic for the matching behavior. |
+| `example` | Defines a test scenario executing a behavior and its expected output. A single `input -> output` pair serves as both specification and automated test. |
+
+For example, the following `example` asserts that submitting a Fukuoka trip application at a specific timestamp results in the `Submitted` state. This is a preview to explain the syntax. The fixture and state types are defined in Section 2.
+
+```
+example submitTrip
+    | "Submit a small trip to Fukuoka" :
+        (fukuokaTripDraft, DateTime("2026-07-27T09:00:00"))
+            -> Submitted
+```
+
+The name `submitTrip` at the start of `example` is the target behavior. The input follows `:` and is enclosed in `( ... )`; the expected output follows `->`. Adding lines that start with `|` adds test cases for different inputs and expectations. In this tutorial, each `|`-to-`->` entry is called a test case.
+
+`invariant` and `guard` appear in later sections. `invariant` defines valid value boundaries for a `data` type. `guard condition else Failure` branches to a failure output when a condition is not met. Both inform `souther examples` about which test cases to generate.
+
+## Prerequisites
+
+Souther requires JDK 25 or later. The compiler and the code it generates are pinned to the Java 25 class-file version, so an earlier JDK cannot run them. Check what you have:
+
+```bash
+java -version
+```
+
+On WSL2, install the JDK inside WSL and confirm that `java -version` answers there, not only in Windows.
+
+The only other tool this tutorial needs is the `souther` command. You do not need to create a Maven module.
+
+On macOS, install using the Souther Homebrew tap:
+
+```bash
+brew install souther-lang/souther/souther
+```
+
+Verify the installation:
+
+```bash
+souther
+```
+
+If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.1.0-rc4`:
+
+```bash
+mkdir -p ~/.local/bin
+curl -L -o ~/.local/bin/souther \
+  https://github.com/souther-lang/souther/releases/download/v0.1.0-rc4/souther
+chmod +x ~/.local/bin/souther
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Each release also publishes `SHA256SUMS`, so you can check the download before running it. Add the `export` line to `~/.zshrc` or `~/.bashrc`. Open a new shell and verify:
+
+```bash
+souther
+```
+
+For VS Code, install the [Souther extension](https://marketplace.visualstudio.com/items?itemName=souther.souther) from the Visual Studio Marketplace, or run `ext install souther.souther` from the command palette. It gives syntax highlighting, diagnostics, completion, go-to-definition, rename, and formatting. The extension bundles its own language server and downloads a Java 25 runtime when the machine has none, so it works whether or not the `souther` command is installed.
+
+Create a working directory and place a single `businesstrip.sou` file inside. Run all commands from this directory:
+
+```bash
+mkdir -p ~/tmp/businesstrip-tutorial
+cd ~/tmp/businesstrip-tutorial
+```
+
+## 1. Creating the First Model from Existing Records
+
+What You Will Learn: Use `data` and `behavior` to represent existing record fields and operations as an initial Souther model without implementations or test cases.
+
+Update: Write the code block below to a new `businesstrip.sou` file.
+
+Assume the following fields are currently recorded for a business trip application:
+
+```
+ApplicantID / Destination / EstimatedExpense / ActualExpense / Status / SubmittedAt / PreApprovedAt / FinalApprovedAt / SettlementAmount
+```
+
+There are four operations: submit, pre-approve, final approve, and settle. Model these fields as `data` and the operations as `behavior`. Submission, approval, and settlement timestamps and amounts use `Option` because they are absent in initial states.
+
+```
+module example.businesstrip
+
+data EmployeeID = String
+data Amount = Int
+
+data Status = Draft | Submitted | PendingPreApproval | PreApproved | TripCompleted | Approved
+
+data TripApplication =
+    { applicantID: EmployeeID
+    , destination: String
+    , estimatedExpense: Amount
+    , actualExpense: Option<Amount>
+    , status: Status
+    , submittedAt: Option<DateTime>
+    , preApprovedAt: Option<DateTime>
+    , finalApprovedAt: Option<DateTime>
+    , settlementAmount: Option<Amount>
+    }
+
+behavior submitTrip : (app: TripApplication, submittedAt: DateTime) -> TripApplication
+    constructs TripApplication
+
+behavior preApprove : (app: TripApplication, preApprovedAt: DateTime) -> TripApplication
+    constructs TripApplication
+
+behavior finalApprove : (app: TripApplication, finalApprovedAt: DateTime) -> TripApplication
+    constructs TripApplication
+
+behavior calculateSettlement : (app: TripApplication) -> Amount
+    constructs Amount
+```
+
+Run `souther examples`:
+
+```bash
+souther examples businesstrip.sou
+```
+
+The tool produces a report like this:
+
+```
+example.businesstrip                                     measurement: complete
+  submitTrip               injected      rows 0    pending 0
+    signature   not applicable (this behavior's output is not a sum)
+    partition   axes 6   single-axis 0/0   (6 not measured: no row names this behavior)
+      · not derivable: app.applicantID
+      · not derivable: app.destination
+      · not derivable: app.estimatedExpense
+      · not derivable: submittedAt
+    boundary    not measured (no line was derived at any position)
+    branch      not applicable (this behavior has no body)
+
+4 behaviors: 0 implemented, 4 injected; 0 rows waiting for a `let`.
+adequacy: undetermined
+```
+
+In the initial report, `submitTrip` shows `signature not applicable`. This indicates that the output type, `TripApplication`, is a single record type, so the report cannot determine whether test cases cover distinct output states. You can write expected values for the full record, but to distinguish `Submitted` and `PendingPreApproval` as output variants, states must be modeled as separate types.
+
+`branch not applicable (this behavior has no body)` appears because no `let` implementation exists yet. Once state types are separated and implementation is added, the report can evaluate code branches.
+
+`adequacy: undetermined` does not mean there are no issues. Because four behaviors lack implementations, test cases cannot be run to evaluate missing coverage.
+
+## 2. Modeling States as Types
+
+What You Will Learn: Instead of recording state in a `Status` field, create distinct types for each state. This expresses state transitions explicitly in behavior inputs and outputs.
+
+Update: Replace `Status` and `TripApplication` from Section 1 with three state types and a sum type. Temporarily remove `preApprove`, `finalApprove`, and `calculateSettlement`.
+
+To make output states measurable by `signature`, turn the output type into a sum type.
+
+> What happens after submitting a trip application?
+>
+
+Domain SME: "Applications exceeding 100,000 JPY require pre-approval by a manager. Others go directly to accounting."
+
+As a test case, this rule looks like:
+
+```
+example submitTrip
+    | "Routes to accounting if 100,000 JPY is not exceeded" :
+        (fukuokaTripDraft, DateTime("2026-07-27T09:00:00"))
+            -> Submitted
+```
+
+The expected output is `Submitted`. In Section 1, `Submitted` was a value of type `Status`, while `submitTrip` returned `TripApplication`. Split states into types so that states can be returned directly.
+
+```
+data Draft =
+    { applicantID: EmployeeID
+    , destination: String
+    , estimatedExpense: Amount
+    }
+
+data Submitted =
+    { applicantID: EmployeeID
+    , destination: String
+    , estimatedExpense: Amount
+    , submittedAt: DateTime
+    }
+
+data PendingPreApproval =
+    { applicantID: EmployeeID
+    , destination: String
+    , estimatedExpense: Amount
+    , submittedAt: DateTime
+    }
+
+data TripApplication = Draft | Submitted | PendingPreApproval
+```
+
+`Draft` has no `submittedAt` field because submission timestamp does not exist before submission. Separating state types eliminates `Option` for fields that are absent in a given state.
+
+`Draft | Submitted | PendingPreApproval` is a sum type representing exactly one of these three types. For instance, `Submitted` contains `submittedAt`, whereas `Draft` does not. You know this from the type without checking a status field.
+
+This is a modeling hint built into the type system: when an operation accepts `Draft`, it cannot be called with a `Submitted` application. Rather than distributing status checks throughout the code, make the valid states of an operation part of its input and output types. As the workflow grows, this keeps impossible transitions out of the model.
+
+`submitTrip` takes a `Draft` and returns one of two states:
+
+```
+behavior submitTrip : (app: Draft, submittedAt: DateTime) -> Submitted | PendingPreApproval
+    constructs Submitted, PendingPreApproval
+```
+
+Remove the other three behaviors for now; they will be redefined in Sections 7 and 8.
+
+Define `fukuokaTripDraft` as a test fixture created with `let name = value`:
+
+```
+let fukuokaTripDraft = Draft
+    { applicantID = EmployeeID("e-001")
+    , destination = "Fukuoka"
+    , estimatedExpense = Amount(28000)
+    }
+
+example submitTrip
+    | "Routes to accounting if 100,000 JPY is not exceeded" :
+        (fukuokaTripDraft, DateTime("2026-07-27T09:00:00"))
+            -> Submitted
+    | "Requires pre-approval if exceeding 100,000 JPY" :
+        (Draft { ...fukuokaTripDraft, estimatedExpense = Amount(120000) },
+         DateTime("2026-07-27T09:00:00"))
+            -> PendingPreApproval
+```
+
+`Draft { ... }` constructs a record. `{ field = value }` sets fields, and `...fukuokaTripDraft` copies existing record fields while overriding specified fields.
+
+```
+  submitTrip               injected      rows 2    pending 2
+    signature   out specified 2/2  observed 0/2  verified 0/2
+    partition   not measured (no partition axis was derived at any position)
+      · not derivable: app.applicantID
+      · not derivable: app.destination
+      · not derivable: app.estimatedExpense
+      · not derivable: submittedAt
+    boundary    not measured (no line was derived at any position)
+    branch      not applicable (this behavior has no body)
+
+1 behavior: 0 implemented, 1 injected; 2 rows waiting for a `let`.
+adequacy: undetermined
+```
+
+`signature` now shows counts. `specified 2/2` means the test cases cover both `Submitted` and `PendingPreApproval`. `observed 0/2` indicates that the behavior is not yet implemented.
+
+Next, add the behavior `let`. The threshold `100000` is not yet defined in the model; `120000` in the example is merely one input above the threshold.
+
+## 3. Implementing the Behavior
+
+What You Will Learn: A `behavior` declares an input/output contract, and a `let` provides decision logic. Implement `submitTrip` to enable test execution.
+
+Update: Keep the `submitTrip` behavior declaration and add a matching `let` directly below it.
+
+Express the rule "exceeds 100,000 JPY" as a condition:
+
+```
+let submitTrip (app, submittedAt) =
+    if app.estimatedExpense.value > 100000
+        then PendingPreApproval { ...app, submittedAt = submittedAt }
+        else Submitted { ...app, submittedAt = submittedAt }
+```
+
+```
+  submitTrip               implemented   rows 2    pending 0
+    signature   out specified 2/2  observed 2/2  verified 2/2
+    partition   axes 1   single-axis 2/2
+      · not derivable: app.applicantID
+      · not derivable: app.destination
+      · not derivable: submittedAt
+    boundary    0/2
+      · no row is at submitTrip/app.estimatedExpense = 100000 (guard@32:5)
+      · no row is at submitTrip/app.estimatedExpense = 100001 (guard@32:5)
+    branch      2/2
+
+1 behavior: 1 implemented, 0 injected; 0 rows waiting for a `let`.
+adequacy: not satisfied
+```
+
+Now all four report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `boundary 0/2` shows missing test cases for the exact boundary values 100000 and 100001.
+
+Whether 100000 belongs to pre-approval or direct submission must be confirmed against the business rules.
+
+## 4. Turning Business Boundaries into Test Cases
+
+What You Will Learn: Confirm exact boundary behavior with domain experts and reflect it in conditions and test cases.
+
+Update: Change `>` to `>=` in the submission condition, then add test cases for 100,000 JPY and 99,999 JPY.
+
+> What happens at exactly 100,000 JPY?
+>
+
+Domain SME: "The regulations say '100,000 JPY or more.' Exactly 100,000 JPY requires pre-approval."
+
+`> 100000` was incorrect:
+
+```
+if app.estimatedExpense.value >= 100000
+```
+
+Generate boundary test scaffolds:
+
+```bash
+souther examples businesstrip.sou --generate --boundaries
+```
+
+Uncomment generated scaffolds and fill in expected outputs based on business rules:
+
+```
+| "Exactly 100,000 JPY requires pre-approval" :
+    (Draft { ...fukuokaTripDraft, estimatedExpense = Amount(100000) },
+     DateTime("2026-07-27T09:00:00"))
+        -> PendingPreApproval
+| "99,999 JPY routes directly to accounting" :
+    (Draft { ...fukuokaTripDraft, estimatedExpense = Amount(99999) },
+     DateTime("2026-07-27T09:00:00"))
+        -> Submitted
+```
+
+```
+  submitTrip               implemented   rows 4    pending 0
+    signature   out specified 2/2  observed 2/2  verified 2/2
+    partition   axes 1   single-axis 2/2
+      · not derivable: app.applicantID
+      · not derivable: app.destination
+      · not derivable: submittedAt
+    boundary    2/2
+    branch      2/2
+
+1 behavior: 1 implemented, 0 injected; 0 rows waiting for a `let`.
+adequacy: satisfied
+```
+
+`adequacy` becomes `satisfied`. This means test coverage matches what the model currently declares.
+
+## 5. Expressing Decision Reasons as Domain Values
+
+What You Will Learn: Extract implicit conditions into explicit domain values named `PreApprovalReason`. Ensure that new reasons trigger compile-time checks if they are unhandled.
+
+Update: Add `Role` to state types and fixtures. Replace submission condition logic with a reason-list builder, and add a decision behavior with test cases.
+
+Domain SME: "General employees require manager pre-approval regardless of expense amount."
+
+Add `Role` to state types and fixtures:
+
+```
+data Role = Manager | GeneralEmployee
+
+let isGeneralEmployee (role: Role): Bool =
+    match role with
+        | Manager         -> false
+        | GeneralEmployee -> true
+
+let submitTrip (app, submittedAt) =
+    if app.estimatedExpense.value >= 100000 || isGeneralEmployee(app.role)
+        then PendingPreApproval { ...app, submittedAt = submittedAt }
+        else Submitted { ...app, submittedAt = submittedAt }
+```
+
+Next, replace inline boolean checks with explicit reason types:
+
+```
+data HighExpense = { threshold: Amount }
+data InsufficientAuthority = { role: Role }
+data PreApprovalReason = HighExpense | InsufficientAuthority
+data PreApprovalReasonList = List<PreApprovalReason>
+```
+
+Determine the applicable reasons by filtering the candidate list:
+
+```
+let candidateReasons (role: Role): List<PreApprovalReason> =
+    [ HighExpense { threshold = Amount(100000) }
+    , InsufficientAuthority { role = role }
+    ]
+
+let isHighExpense (estimatedExpense: Amount, threshold: Amount): Bool =
+    estimatedExpense.value >= threshold.value
+
+let matchesReason (estimatedExpense: Amount, role: Role, reason: PreApprovalReason): Bool =
+    match reason with
+        | HighExpense { threshold } -> isHighExpense(estimatedExpense, threshold)
+        | InsufficientAuthority     -> isGeneralEmployee(role)
+
+let evaluatePreApprovalReasons (estimatedExpense: Amount, role: Role): List<PreApprovalReason> =
+    List.filter(reason -> matchesReason(estimatedExpense, role, reason), candidateReasons(role))
+
+behavior determinePreApprovalRequirement : (estimatedExpense: Amount, role: Role) -> PreApprovalReasonList
+    constructs PreApprovalReasonList, HighExpense, InsufficientAuthority, Amount
+
+let determinePreApprovalRequirement (estimatedExpense, role) =
+    PreApprovalReasonList(evaluatePreApprovalReasons(estimatedExpense, role))
+
+behavior submitTrip : (app: Draft, submittedAt: DateTime) -> Submitted | PendingPreApproval
+    constructs Submitted, PendingPreApproval, PreApprovalReasonList, HighExpense, InsufficientAuthority, Amount
+
+let submitTrip (app, submittedAt) = {
+    let reasons = evaluatePreApprovalReasons(app.estimatedExpense, app.role)
+    if List.isEmpty(reasons)
+        then Submitted { ...app, submittedAt = submittedAt }
+        else PendingPreApproval { ...app, submittedAt = submittedAt
+                                , reasons = PreApprovalReasonList(reasons) }
+}
+```
+
+Add test cases for `determinePreApprovalRequirement`:
+
+```
+example determinePreApprovalRequirement
+    | "No reasons for Manager under 100,000 JPY" :
+        (Amount(28000), Manager)
+            -> PreApprovalReasonList([])
+    | "HighExpense reason for exactly 100,000 JPY" :
+        (Amount(100000), Manager)
+            -> PreApprovalReasonList([ HighExpense { threshold = Amount(100000) } ])
+    | "InsufficientAuthority reason for GeneralEmployee" :
+        (Amount(28000), GeneralEmployee)
+            -> PreApprovalReasonList([ InsufficientAuthority { role = GeneralEmployee } ])
+```
+
+If a new reason variant is added to `PreApprovalReason`, `match` expressions trigger exhaustive pattern matching errors (`E1201`) until handled.
+
+This is another useful modeling signal. If a condition matters enough to explain a decision, give it a domain name and make it a case in a sum type. Adding a new case then identifies every decision that must account for it, instead of relying on searches for repeated boolean expressions.
+
+## 6. Defining Invariants on Types
+
+What You Will Learn: Write `invariant` rules on `EmployeeID`, `Amount`, and `Destination` so valid value constraints are enforced uniformly at construction time.
+
+Update: Add invariants to `EmployeeID`, `Amount`, and `Destination`. Replace `String` destination with `Destination` type.
+
+```
+data EmployeeID = String
+    invariant String.length(value) >= 1
+data Amount = Int
+    invariant value >= 0
+data Destination = String
+    invariant String.length(value) >= 1
+```
+
+Invariants generate test boundary requirements in `souther examples`, such as minimum string length or non-negative amount checks.
+
+Add boundary test cases for 0 JPY and single-character strings to satisfy the report's coverage requirements.
+
+Place a rule in an `invariant` when it defines whether a value can exist, rather than whether a particular workflow step may proceed. This prevents the same validity check from being repeated across behaviors and makes invalid values unrepresentable once construction succeeds.
+
+## 7. Distinguishing Reimbursement Targets by Type
+
+What You Will Learn: Model expense items and payment responsibilities as explicit sum types so that only out-of-pocket expenses are included in reimbursement calculations.
+
+Update: Replace estimated and actual expenses with detailed item lists. Add types for line items, payment responsibilities, settlement calculation behavior, and matching test cases.
+
+```
+data Origin = String
+    invariant String.length(value) >= 1
+data DestinationCity = String
+    invariant String.length(value) >= 1
+data AttendeeCount = Int
+    invariant value >= 1
+data ExpenseCategoryName = String
+    invariant String.length(value) >= 1
+
+data ExpenseCommon = { amount: Amount }
+
+data TransportExpense = { ...ExpenseCommon, origin: Origin, destination: DestinationCity }
+data LodgingExpense = { ...ExpenseCommon }
+data EntertainmentExpense = { ...ExpenseCommon, attendees: AttendeeCount }
+data OtherExpense = { ...ExpenseCommon, categoryName: ExpenseCategoryName }
+data ExpenseCategory = TransportExpense | LodgingExpense | EntertainmentExpense | OtherExpense
+
+data CompanyResponsibility = OutOfPocket | AdvancePayment | CorporateCard
+data PaymentResponsibility = CompanyResponsibility | ThirdPartyPaid
+
+data ExpenseItem = { category: ExpenseCategory, responsibility: PaymentResponsibility }
+
+data EstimatedExpenses = List<ExpenseItem>
+    invariant List.length(value) >= 1
+data ActualExpenses = List<ExpenseItem>
+    invariant List.length(value) >= 1
+data SettlementAmount = Int
+    invariant value >= 0
+```
+
+Implement settlement calculation:
+
+```
+let calculateReimbursement (item: ExpenseItem): Int =
+    match item.responsibility with
+        | CompanyResponsibility as company ->
+            match company with
+                | OutOfPocket    -> item.category.amount.value
+                | AdvancePayment -> 0
+                | CorporateCard  -> 0
+        | ThirdPartyPaid -> 0
+
+behavior calculateSettlement : (actual: ActualExpenses) -> SettlementAmount
+    constructs SettlementAmount
+
+let calculateSettlement (ActualExpenses(items)) =
+    SettlementAmount(List.sum(List.map(calculateReimbursement, items)))
+```
+
+Add test cases covering out-of-pocket, corporate card, advance payment, and third-party expenses.
+
+## 8. Expressing Business Rejections as Output Types
+
+What You Will Learn: Represent business rejections (such as missing authority or a missing trip report) as explicit sum-type outputs rather than unhandled exceptions.
+
+Update: Wrap employee fields in `Employee`. Add state types and behaviors for approval, trip completion, and final approval with rejection outputs and test cases.
+
+Souther has no exceptions for modeling business outcomes. That constraint is intentional: a rejected approval, missing report, or invalid expense is data that the caller must be able to see and handle. Include each expected outcome in the behavior's output sum type, and reserve integration failures such as an unavailable external service for the application boundary.
+
+```
+data Employee =
+    { employeeID: EmployeeID
+    , role: Role
+    , managerID: EmployeeID
+    }
+
+data TripReport = String
+    invariant String.length(value) >= 1
+
+data PreApprovedRecord =
+    { preApprovedAt: DateTime
+    , preApproverID: EmployeeID
+    }
+
+data PreApprovalHistory = NoPreApproval | PreApprovedRecord
+
+data TripCompleted =
+    { applicant: Employee
+    , destination: Destination
+    , estimatedExpenses: EstimatedExpenses
+    , submittedAt: DateTime
+    , actualExpenses: ActualExpenses
+    , completedAt: DateTime
+    , report: TripReport
+    , preApproval: PreApprovalHistory
+    }
+
+data PendingFinalApproval = { ...TripCompleted }
+
+behavior preApprove : (app: PendingPreApproval, approverID: EmployeeID, preApprovedAt: DateTime)
+    -> PreApproved | UnauthorizedApproval
+    constructs PreApproved, PreApprovedRecord, UnauthorizedApproval
+
+let preApprove (app, approverID, preApprovedAt) = {
+    guard approverID == app.applicant.managerID else UnauthorizedApproval
+    PreApproved { ...app
+        , preApproval = PreApprovedRecord { preApprovedAt = preApprovedAt, preApproverID = approverID } }
+}
+
+behavior completeTrip : (app: InTransitTrip, items: List<ExpenseItem>, reportText: String, completedAt: DateTime)
+    -> TripCompleted | InvalidActualExpenses | MissingTripReport
+    constructs TripCompleted, ActualExpenses, TripReport, NoPreApproval, InvalidActualExpenses, MissingTripReport
+
+let completeTrip (app, items, reportText, completedAt) = {
+    guard ActualExpenses(items) as actual else InvalidActualExpenses
+    guard List.sum(List.map(item -> item.category.amount.value, items)) > 0 else InvalidActualExpenses
+    guard TripReport(reportText) as report else MissingTripReport
+
+    match app with
+        | Submitted as submitted ->
+            TripCompleted { ...submitted
+                , actualExpenses = actual
+                , completedAt = completedAt
+                , report = report
+                , preApproval = NoPreApproval }
+        | PreApproved as preApproved ->
+            TripCompleted { ...preApproved
+                , actualExpenses = actual
+                , completedAt = completedAt
+                , report = report
+                , preApproval = preApproved.preApproval }
+}
+
+behavior requestFinalApproval : (completed: TripCompleted) -> PendingFinalApproval
+    constructs PendingFinalApproval
+
+let requestFinalApproval (completed) = PendingFinalApproval { ...completed }
+
+behavior finalApprove : (app: PendingFinalApproval, approverID: EmployeeID, finalApprovedAt: DateTime)
+    -> Approved | UnauthorizedApproval
+    constructs Approved, SettlementAmount, UnauthorizedApproval
+
+let finalApprove (app, approverID, finalApprovedAt) = {
+    guard approverID == app.applicant.managerID else UnauthorizedApproval
+    Approved { ...app
+        , finalApprovedAt = finalApprovedAt
+        , finalApproverID = approverID
+        , settlementAmount = SettlementAmount(List.sum(List.map(calculateReimbursement, app.actualExpenses.value))) }
+}
+```
+
+Add test cases asserting both successful transitions and rejection outputs (`UnauthorizedApproval`, `InvalidActualExpenses`, `MissingTripReport`).
+
+## 9. Using Report Gaps to Drive the Next Test Cases
+
+What You Will Learn: Read gaps in the report's partition and boundary metrics to determine missing test scenarios. Use `--strict` in CI.
+
+Update: Add a test case for final approval on pre-approved applications. Review `--behavior`, `--generate --boundaries`, and `--strict` flags.
+
+Filter reports for a single behavior:
+
+```bash
+souther examples businesstrip.sou --behavior finalApprove
+```
+
+```
+finalApprove             implemented   rows 2    pending 0
+  signature   out specified 2/2  observed 2/2  verified 2/2
+  partition   axes 2   single-axis 2/4   pairs 1 reached / 1 known reachable, 3 untried
+    · no row is in `GeneralEmployee`
+    · no row is in `PreApprovedRecord`
+  boundary    1/7
+```
+
+`no row is in PreApprovedRecord` highlights that no test case evaluates final approval for an application that went through pre-approval. Adding that scenario covers the missing path.
+
+Treat these gaps as questions about the model, not merely a coverage target. A missing partition can reveal a business case that has not been decided, and a missing boundary can reveal an ambiguous rule. The report helps turn those questions into the next conversation with a domain expert and the next executable example.
+
+In CI pipelines, run with `--strict` to enforce zero report gaps:
+
+```bash
+souther examples businesstrip.sou --strict
+```
+
+## Homework
+
+You now have the main pipeline from submission to final approval. In `businesstrip/src/main/souther/businesstrip.sou`, you can explore these additional domain rules:
+
+- Rejections (`rejectPreApproval` and `rejectFinalApproval`) handling empty rejection reasons via `RejectionReason` invariants and `MissingRejectionReason` output variants.
+- Remands (`sendBack`) converting rejected applications back into `Draft` while ensuring rejection reasons are cleared by type constraints.
+- Third-party expense coverage as a third pre-approval trigger reason.
+- Lodging expense invoice registration number validation (`InvoiceRegistrationNumber`) using string pattern matching in `invariant`.
+- Trip start and end dates validated via cross-field invariants in common application data.
+- Separating test cases into `businesstrip.examples.sou` using `examples for example.businesstrip`.

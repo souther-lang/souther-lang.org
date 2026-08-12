@@ -6,13 +6,22 @@ hero:
   tagline: |
     <p class="motto">A small JVM language for <strong>business rules that stay true</strong>.</p>
     <p>Business software changes constantly. The rules that define it should not be scattered
-    across comments, constructors, exception handling and service calls. Souther describes
-    domain data, its constraints and the transitions it can make, and generates types and
-    behaviors that Java uses — so the model stays explicit all the way to the application boundary.</p>
+    across comments, constructors, exception handling and service calls. Souther turns the
+    <code>data</code> and <code>behavior</code> of a specification into executable domain types,
+    while making the constraints, construction paths, and external dependencies that specifications
+    often leave in comments explicit and checked.</p>
   actions:
+    - text: Build your first model
+      link: /tutorial/
+      icon: right-arrow
+    - text: Read the principles
+      link: /principles/
+      icon: right-arrow
+      variant: minimal
     - text: Explore Souther on GitHub
       link: https://github.com/souther-lang/souther
       icon: external
+      variant: minimal
     - text: Read the specification
       link: https://github.com/souther-lang/souther/blob/main/specification.adoc
       icon: external
@@ -30,7 +39,7 @@ heroCode: |
       constructs Submitted, Rejected
 
   let submit (request, submittedAt) = {
-      require request.plannedCost.value <= 100000
+      guard request.plannedCost.value <= 100000
           else Rejected { reason = "high_cost" }
       Submitted { ...request, submittedAt = submittedAt }
   }
@@ -132,12 +141,14 @@ behavior withdraw : (request: WithdrawRequest)
 <FeatureRow title="Who is allowed to create this value" reverse>
 <Fragment slot="prose">
 
-A behavior may only build the data it declares in `constructs`. Building something it did not
-declare is `E1002`; declaring something it never builds is `E1006`.
+A behavior's construction authority is explicit. A behavior with a `let` may state the data it
+builds in `constructs`; if it omits the clause, Souther infers the set from its body. When the
+clause is written, building an undeclared value is `E1002` and declaring a value it never builds is
+`E1006`. An injected behavior must declare its construction set.
 
-Both directions are checked, so the clause reads as an accurate account of what this behavior
-brings into existence and what it merely passes through. Combined with non-public constructors,
-the set of places a `Submitted` can come from is a list you can read.
+Both directions are checked, so an explicit clause is an accurate account of what a behavior brings
+into existence and what it merely passes through. Combined with non-public constructors, the set
+of places a `Submitted` can come from is a list you can read.
 
 </Fragment>
 <Fragment slot="code">
@@ -160,12 +171,13 @@ but does not declare `constructs Member`.
 <FeatureRow title="A guard names the outcome it produces">
 <Fragment slot="prose">
 
-`require` reads as the precondition it is, and says what the behavior becomes when it does not
+`guard` states the condition for continuing and says what the behavior becomes when it does not
 hold. There is no early-return convention to learn and no exception to catch.
 
-It also carries information forward. Below the `require`, the compiler knows the balance covers the
-amount, and that is what discharges `Balance`'s `invariant value >= 0` on the next line — the
-construction is proved safe rather than checked again at run time.
+It also carries information forward. Below the `guard`, the compiler knows the balance covers the
+amount, and that discharges `Balance`'s `invariant value >= 0` on the next line. The invariant is
+still checked at construction time; an unguarded violation is a model bug and aborts rather than
+producing a business outcome.
 
 </Fragment>
 <Fragment slot="code">
@@ -175,7 +187,7 @@ let withdraw (request, currentBalance, updateBalance) =
     match currentBalance(request.account) with
         | NoAccount          -> NoAccount
         | Balance as current -> {
-            require current.value >= request.amount.value
+            guard current.value >= request.amount.value
                 else InsufficientFunds {
                     shortfall = request.amount.value - current.value
                 }
@@ -253,15 +265,18 @@ error E1301:
 </Fragment>
 </FeatureRow>
 
-<FeatureRow title="Examples the compiler evaluates" reverse>
+<FeatureRow title="Examples make rules executable—and reveal what is missing" reverse>
 <Fragment slot="prose">
 
 An `example` sits next to the behavior it describes and is evaluated during compilation. If the
-behavior stops agreeing with it, the build fails. There is no test runner to invoke and no suite to
-forget.
+behavior stops agreeing with it, the build fails. `souther examples` additionally reports coverage
+gaps. The example is executable documentation rather than a separate test model that can drift from
+the rule.
 
 They are written where the rule is, so the threshold that decides `PricedCart` from `EmptyCart` is
 readable beside the code that implements it — the documentation and the check are the same text.
+Its report also identifies untested output cases, decision boundaries, and partitions. A gap is not
+just a coverage number: it is the next question to ask of the domain.
 
 </Fragment>
 <Fragment slot="code">
@@ -278,6 +293,32 @@ example quote
         (Cart { open = false, items =
             [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ] })
         -> EmptyCart
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="A module boundary is a contract" reverse>
+<Fragment slot="prose">
+
+The public part of a module is stated with `exposing`, and imports name every dependency they use.
+For a composed behavior, its public output cases are declared too. This prevents a change inside one
+module from silently changing the contract seen by another module or by Java.
+
+The model therefore has a deliberate boundary before it reaches application code: implementations
+may evolve, but a public business contract changes only when its declaration changes.
+
+</Fragment>
+<Fragment slot="code">
+
+```sou
+module example.order exposing (
+    placeOrder : OrderPlaced | InsufficientStock
+)
+
+import example.stock ( reserve )
+
+behavior placeOrder = reserve >-> recordOrder
 ```
 
 </Fragment>
@@ -313,7 +354,7 @@ public static Encoder<MemberId, String> encoder()
 <FeatureRow title="Dependencies on the outside world are declared, not implemented" reverse>
 <Fragment slot="prose">
 
-A `behavior` with no `let` has no implementation in Souther. Java supplies one. `requires` names
+A `behavior` with no `let` has no implementation in Souther. Java supplies one. `depends on` names
 every injected dependency a behavior uses, and over-declaring is `E1603` just as under-declaring is
 an error.
 
@@ -335,7 +376,7 @@ behavior updateBalance : (account: AccountNo, newBalance: Balance)
 
 behavior withdraw : (request: WithdrawRequest)
     -> Withdrawn | InsufficientFunds | NoAccount
-    requires currentBalance, updateBalance
+    depends on currentBalance, updateBalance
 ```
 
 </Fragment>
@@ -421,7 +462,7 @@ behavior 提出する : (申請: 申請準備中, 提出日時: String)
     constructs 提出済み, 却下
 
 let 提出する (申請, 提出日時) = {
-    require 申請.予定費用.value <= 100000
+    guard 申請.予定費用.value <= 100000
         else 却下 { 理由 = "high_cost" }
     提出済み { ...申請, 提出日時 = 提出日時 }
 }
@@ -436,7 +477,7 @@ let 提出する (申請, 提出日時) = {
 Not "should not" — cannot. There is no syntax for reading a clock, opening a socket or mutating a
 field, and calling an arbitrary JVM method is `E1401`.
 
-Everything that touches the world arrives as an injected behavior named in `requires`. A domain
+Everything that touches the world arrives as an injected behavior named in `depends on`. A domain
 computation therefore depends on its inputs and nothing else, which is what makes an `example`
 evaluable at compile time in the first place.
 
@@ -465,7 +506,7 @@ rendered in the locale you select. `--format json` emits the same diagnostic as 
 tooling.
 
 The catalogue is part of the specification rather than a by-product of the implementation. `E1002`
-and `E1006` are what keep `constructs` honest; `E1603` does the same for `requires`.
+and `E1006` are what keep `constructs` honest; `E1603` does the same for `depends on`.
 
 </Fragment>
 <Fragment slot="code">
@@ -499,14 +540,25 @@ result is a domain model whose construction paths, business outcomes and depende
 visible.
 
 Souther compiles to JVM class files. Generated data and behavior types are designed to be used from
-Java, while Java remains responsible for infrastructure and integration. The class files target
-Java 21; building the compiler requires JDK 25.
+Java, while Java remains responsible for infrastructure and integration. Souther requires Java 25
+or later for both compilation and integration.
+
+Business outcomes, invalid boundary input, model bugs, and platform failures remain distinct. A
+rejection such as `InsufficientFunds` is a case in a behavior's output; malformed input is reported
+by a decoder's `Result`; an invariant violation inside the domain aborts; and a database outage is
+an exception handled at the Java integration boundary. Keeping these categories separate prevents
+an infrastructure failure or a programming defect from being mistaken for a business decision.
 
 ## Tooling
 
 The compiler, runtime, CLI, language server and VS Code extension are open source. The extension
 gives semantic highlighting, hover, go-to-definition and inline diagnostics over the same
 diagnostics the CLI emits, and `souther-fmt` formats sources to a single layout.
+
+Start with a single self-contained file: `souther run` decodes JSON input, runs an exposed behavior
+with no external dependencies, and prints JSON output. When the model is ready to integrate, `souther
+compile` generates Java 25 class files; Java supplies the database, clock, HTTP client, and other
+infrastructure through declared behaviors.
 
 ## Built for the part of software that must stay true
 

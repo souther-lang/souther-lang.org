@@ -12,7 +12,8 @@ const heroCode = data.heroCode;
 		<div class="hero code-hero">
 			<div class="stack">
 				<div class="copy">
-					<h1 id="_top" data-page-title set:html={title} />
+					{/* The language name is a proper noun; the title must survive translation. */}
+					<h1 id="_top" data-page-title class="notranslate" translate="no" set:html={title} />
 					{tagline && <div class="tagline" set:html={tagline} />}
 				</div>
 				{actions.length > 0 && (

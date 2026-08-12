@@ -1,0 +1,184 @@
+---
+title: Souther Principles
+description: The commitments that guide Souther's language design.
+---
+
+Souther is a language for making business rules executable. These principles are the commitments
+we use when designing it. They are not a list of aspirations or a catalogue of features: a
+principle should lead to a concrete language decision, and it should be possible to tell whether
+that decision keeps the promise.
+
+The principles are also a contract. They describe what a programmer can expect from Souther, and
+the constraints we accept in return for keeping domain models honest.
+
+## The model is the source of truth
+
+Business concepts belong in types, behaviors, and their declarations—not in a convention shared
+between Java classes, database schemas, validation code, and comments. A name in the rulebook
+should be a name in the model. If the domain distinguishes a draft from a submission, or an
+activated address from an unactivated one, Souther represents that distinction directly.
+
+This is why Souther has records, sums, newtypes, and Unicode identifiers. The model should say
+what the business says, without first being flattened into the shapes most convenient for an
+application framework.
+
+## Parse, don't validate
+
+At a boundary, Souther turns untrusted input into a domain value or a structured decoding failure.
+It does not pass a map, JSON object, or primitive into the domain and ask later code to remember a
+series of validation predicates. Parsing is the act of learning enough about input to give it a
+more precise type, and constructing a value that carries those facts with it.
+
+```sou
+data AccountNo = String
+    invariant String.length(value) > 0
+
+data Amount = Int
+    invariant value >= 0
+```
+
+Once decoding has produced an `AccountNo` and an `Amount`, a behavior receives those facts in its
+argument types. It need not repeat that an account number is non-empty or an amount is
+non-negative. Code outside Souther does not receive a public constructor that can skip those
+rules, and the compiler uses a proven guard when it can establish an invariant before construction.
+
+Decoders and encoders are derived from exposed data declarations for maps, JSON, and database
+rows; they are not a second hand-written model that can fall behind the first one. Invalid input
+stays at the boundary with the path and reason that explain why it could not become domain data.
+
+## States are types, not flags
+
+A change in what an entity is allowed to do should change its type. Representing a lifecycle with
+a boolean asks every caller to remember the same check. Representing it with distinct cases makes
+the permission part of the function signature.
+
+```sou
+data Activated = EmailAddress
+data Unactivated = EmailAddress
+data Email = Activated | Unactivated
+
+behavior notify : (to: Activated, subject: String) -> Sent
+```
+
+An `Unactivated` address cannot accidentally be passed to `notify`. When a new state is added,
+exhaustive matches identify the places that must decide what it means.
+
+## Business outcomes are ordinary data
+
+A behavior declares every outcome it may produce. A refusal such as `InsufficientFunds` is a
+domain case alongside `Withdrawn`, rather than an exception or an error wrapper imposed by the
+language.
+
+```sou
+behavior withdraw : (request: WithdrawRequest)
+    -> Withdrawn | InsufficientFunds | NoAccount
+```
+
+Whether an outcome is exceptional depends on the next business step, not on a global hierarchy.
+Platform failures remain exceptions at the integration boundary; business outcomes stay visible in
+the model and in the type.
+
+## Creation has an explicit authority
+
+Data is not freely forgeable. A behavior with a `let` may list the domain values it creates in
+`constructs`; otherwise the compiler infers them from its body. When the clause is written, the
+compiler verifies it in both directions. An injected behavior must declare its construction set.
+That gives every important value an auditable origin: it was decoded at a boundary, or it was
+constructed by one of the behaviors named in the model.
+
+```sou
+behavior submit : (request: Draft, submittedAt: String)
+    -> Submitted | Rejected
+    constructs Submitted, Rejected
+```
+
+The point is not ceremony. It is to make “where can this state come from?” a question that the
+source code can answer precisely.
+
+## The domain cannot secretly reach the world
+
+Domain code has no syntax for time, I/O, mutation, randomness, reflection, or arbitrary JVM calls.
+Anything that reaches the outside world is supplied as an injected behavior and named in
+`depends on`.
+
+```sou
+behavior currentBalance : (account: AccountNo) -> Balance | NoAccount
+
+behavior readBalance : (account: AccountNo) -> Balance | NoAccount
+    depends on currentBalance
+
+let readBalance (account, currentBalance) = currentBalance(account)
+```
+
+This makes dependencies a property of the model instead of a package convention. It also leaves a
+pure core that is understandable from its inputs and safe for the compiler to evaluate.
+
+## Composition follows accepted cases
+
+Pipelines are connected by the cases a next stage accepts. A stage receives the part of the
+previous output it can handle; all other outcomes leave the mainline and appear in the resulting
+type.
+
+```sou
+behavior lookupAndFormat = findMember >-> formatMember
+```
+
+Nothing has to be branded as an “error.” The same domain case can continue in one pipeline and
+stop in another, because the meaning comes from the composition at hand. The compiler calculates
+the complete output type of the pipeline.
+
+## Absence is stated, never smuggled in
+
+`null` is not part of Souther. An optional field is written with `?` and consumed through
+`Option`, so absence is visible both in a declaration and at the use site.
+
+```sou
+data Employee =
+    { id: EmployeeId
+    , manager: Employee?
+    }
+```
+
+This keeps a missing value from masquerading as every possible type, and makes recursive domain
+models explicit about where they terminate.
+
+## Rules and examples live together
+
+An `example` sits beside the behavior it describes and is evaluated during compilation. It is both
+executable documentation and a check that the rule still has the outcome it claims.
+
+The intended result does not live only in a separate test suite, nor does it rely on remembering to
+run a particular command. Changing a rule means changing or confirming its examples in the same
+place.
+
+## The Java boundary preserves the model
+
+Souther generates Java types that retain the distinctions the model made. A sum output becomes a
+sealed interface; Java must handle its cases exhaustively. Java may implement declared injected
+behaviors, but it does not receive unrestricted construction of protected domain values.
+
+Interoperation is a boundary, not an excuse to erase the model. Java gets an idiomatic shape while
+Souther keeps the guarantees that make the shape meaningful.
+
+## Diagnostics are part of the language
+
+When a program violates a rule, the failure is specified. Diagnostics have stable error codes,
+localized prose, and a structured JSON form for tools. A compiler error is part of the user-facing
+contract, not incidental output from an implementation detail.
+
+Clear diagnostics matter especially in a language that deliberately refuses some familiar escape
+hatches. The compiler should explain the violated rule and point toward the modelled alternative.
+
+## A small language has a complexity budget
+
+Souther does not add a feature merely because another JVM language has it. New syntax, implicit
+behavior, and escape hatches must earn their place by making business rules clearer while keeping
+the preceding commitments intact.
+
+That means choosing explicit declarations over inference where an important domain fact would
+otherwise be hidden, and declining capabilities that would let a rule bypass the model. The goal
+is not minimalism for its own sake; it is a language whose consequences remain possible to read.
+
+These principles are living design constraints. When a proposed feature conflicts with one, the
+burden is on the feature to show why the contract should change—not on every model to work around
+it.

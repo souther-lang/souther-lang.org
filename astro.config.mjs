@@ -24,6 +24,9 @@ export default defineConfig({
 			},
 			favicon: '/favicon.ico',
 			head: [
+				// The header has its own language selector, so Chrome should not offer the
+				// same thing in a bubble. This only stops the offer; the widget still runs.
+				{ tag: 'meta', attrs: { name: 'google', content: 'notranslate' } },
 				{ tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/icon-192.png' } },
 				{ tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
 				// Starlight emits the rest of the Open Graph tags; the image is ours.
