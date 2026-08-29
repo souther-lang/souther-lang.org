@@ -75,12 +75,12 @@ Verify the installation:
 souther
 ```
 
-If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.1.0-rc5`:
+If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.1.0`:
 
 ```bash
 mkdir -p ~/.local/bin
 curl -L -o ~/.local/bin/souther \
-  https://github.com/souther-lang/souther/releases/download/v0.1.0-rc5/souther
+  https://github.com/souther-lang/souther/releases/download/v0.1.0/souther
 chmod +x ~/.local/bin/souther
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -164,19 +164,26 @@ example.businesstrip                                     measurement: complete
       · not derivable: app.applicantID
       · not derivable: app.destination
       · not derivable: app.estimatedExpense
+      · not derivable: app.actualExpense@Some
+      · not derivable: app.submittedAt@Some
+      · not derivable: app.preApprovedAt@Some
+      · not derivable: app.finalApprovedAt@Some
+      · not derivable: app.settlementAmount@Some
       · not derivable: submittedAt
-    border      not measured (no line was derived at any position)
+    border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
 
-4 behaviors: 0 implemented, 4 injected; 0 rows waiting for a `let`.
-adequacy: undetermined
+4 behaviors: 0 implemented, 0 unimplemented, 4 injected; 0 rows waiting for a `let`.
+adequacy: satisfied
 ```
 
 In the initial report, `submitTrip` shows `signature not applicable`. This indicates that the output type, `TripApplication`, is a single record type, so the report cannot determine whether test cases cover distinct output states. You can write expected values for the full record, but to distinguish `Submitted` and `PendingPreApproval` as output variants, states must be modeled as separate types.
 
 `branch not applicable (this behavior has no body)` appears because no `let` implementation exists yet. Once state types are separated and implementation is added, the report can evaluate code branches.
 
-`adequacy: undetermined` does not mean there are no issues. Because four behaviors lack implementations, test cases cannot be run to evaluate missing coverage.
+`adequacy: satisfied` does not mean the model is finished. Adequacy answers the model as it stands, and this one states no rule and has no test case, so there is nothing for a row to be missing from. It becomes a claim worth reading once the behaviors have conditions and examples.
+
+The nine `not derivable` lines include the `Option` fields as `app.actualExpense@Some` and so on: an optional field is a position the report reaches only where a value is there.
 
 ## 2. Modeling States as Types
 
@@ -265,16 +272,16 @@ example submitTrip
 ```
   submitTrip               injected      rows 2    pending 2
     signature   out specified 2/2  observed 0/2  verified 0/2
-    partition   not measured (no partition axis was derived at any position)
+    partition   not applicable (the rules of this behavior divide no position)
       · not derivable: app.applicantID
       · not derivable: app.destination
       · not derivable: app.estimatedExpense
       · not derivable: submittedAt
-    border      not measured (no line was derived at any position)
+    border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
 
-1 behavior: 0 implemented, 1 injected; 2 rows waiting for a `let`.
-adequacy: undetermined
+1 behavior: 0 implemented, 0 unimplemented, 1 injected; 2 rows waiting for a `let`.
+adequacy: satisfied
 ```
 
 `signature` now shows counts. `specified 2/2` means the test cases cover both `Submitted` and `PendingPreApproval`. `observed 0/2` indicates that the behavior is not yet implemented.
@@ -304,16 +311,16 @@ let submitTrip (app, submittedAt) =
       · not derivable: app.destination
       · not derivable: submittedAt
     border      borders 1   coverage items 2/4
-      ! no row is at the ON point submitTrip/app.estimatedExpense = 100001 (if@32:5)
-      ! no row is at the OFF point submitTrip/app.estimatedExpense = 100000 (if@32:5)
+      ! no row is at the ON point submitTrip/app.estimatedExpense = 100001 (comparison@32:35)
+      ! no row is at the OFF point submitTrip/app.estimatedExpense = 100000 (comparison@32:35)
     branch      2/2
 
-1 behavior: 1 implemented, 0 injected; 0 rows waiting for a `let`.
+1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: not satisfied
 2 gaps marked `!`: what a strict build refuses over.
 ```
 
-Now all four report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `border coverage items 2/4` names the two points no test case stands at: 100001, the first value the condition sends to pre-approval, and 100000, the last one below it. Both are marked `!`, which is what `--strict` refuses over and what the count on the last line is of.
+Now all four report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `border coverage items 2/4` names the two points no test case stands at: 100001, the first value the condition sends to pre-approval, and 100000, the last one below it. Both are marked `!`, which is what `--strict` refuses over and what the count on the last line is of. `comparison@32:35` is where the line was drawn — the comparison itself, not the `if` it was written in.
 
 Whether 100000 belongs to pre-approval or direct submission must be confirmed against the business rules.
 
@@ -390,7 +397,7 @@ them, name each case, and fill in the expected output from the business rules:
     border      borders 1   coverage items 4/4
     branch      2/2
 
-1 behavior: 1 implemented, 0 injected; 0 rows waiting for a `let`.
+1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: satisfied
 ```
 
@@ -680,11 +687,11 @@ souther examples businesstrip.sou --behavior finalApprove
 ```
   finalApprove             implemented   rows 2    pending 0
     signature   out specified 2/2  observed 2/2  verified 2/2
-    partition   axes 2   equivalence partitions 2/4
+    partition   axes 6   equivalence partitions 6/20
       · no row is in `GeneralEmployee` at app.applicant.role
       · no row is in `PreApprovedRecord` at app.preApproval
-    combination pairs 1 reached / 1 known reachable, 3 untried
-    border      borders 7   coverage items 7/14   excluded 14
+    combination pairs 15 reached / 15 known reachable, 149 untried
+    border      borders 24   coverage items 9/48   excluded 48
     branch      4/7
 ```
 
