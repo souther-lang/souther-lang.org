@@ -75,12 +75,12 @@ Verify the installation:
 souther
 ```
 
-If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.1.0`:
+If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.2.0`:
 
 ```bash
 mkdir -p ~/.local/bin
 curl -L -o ~/.local/bin/souther \
-  https://github.com/souther-lang/souther/releases/download/v0.1.0/souther
+  https://github.com/souther-lang/souther/releases/download/v0.2.0/souther
 chmod +x ~/.local/bin/souther
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -161,29 +161,40 @@ example.businesstrip                                     measurement: complete
   submitTrip               injected      rows 0    pending 0
     signature   not applicable (this behavior's output is not a sum)
     partition   axes 6   equivalence partitions 0/0   (6 not measured: no row names this behavior)
-      · not derivable: app.applicantID
-      · not derivable: app.destination
-      · not derivable: app.estimatedExpense
-      · not derivable: app.actualExpense@Some
-      · not derivable: app.submittedAt@Some
-      · not derivable: app.preApprovedAt@Some
-      · not derivable: app.finalApprovedAt@Some
-      · not derivable: app.settlementAmount@Some
-      · not derivable: submittedAt
+      · divided no way: app.applicantID
+      · divided no way: app.destination
+      · divided no way: app.estimatedExpense
+      · divided no way: app.actualExpense@Some
+      · divided no way: app.submittedAt@Some
+      · divided no way: app.preApprovedAt@Some
+      · divided no way: app.finalApprovedAt@Some
+      · divided no way: app.settlementAmount@Some
+      · divided no way: submittedAt
     border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
 
 4 behaviors: 0 implemented, 0 unimplemented, 4 injected; 0 rows waiting for a `let`.
-adequacy: satisfied
+adequacy: undetermined
+  what keeps it open
+    may change in a wider run     0
+    unaffected by a wider run    24
+      app.actualExpense of submitTrip — no row names this behavior
+      app.status of submitTrip — no row names this behavior
+      app.submittedAt of submitTrip — no row names this behavior
+      app.preApprovedAt of submitTrip — no row names this behavior
+      app.finalApprovedAt of submitTrip — no row names this behavior
+      app.settlementAmount of submitTrip — no row names this behavior
 ```
+
+The other three behaviors add six lines each to that list, for the same reason.
 
 In the initial report, `submitTrip` shows `signature not applicable`. This indicates that the output type, `TripApplication`, is a single record type, so the report cannot determine whether test cases cover distinct output states. You can write expected values for the full record, but to distinguish `Submitted` and `PendingPreApproval` as output variants, states must be modeled as separate types.
 
 `branch not applicable (this behavior has no body)` appears because no `let` implementation exists yet. Once state types are separated and implementation is added, the report can evaluate code branches.
 
-`adequacy: satisfied` does not mean the model is finished. Adequacy answers the model as it stands, and this one states no rule and has no test case, so there is nothing for a row to be missing from. It becomes a claim worth reading once the behaviors have conditions and examples.
+`adequacy: undetermined` is not a verdict on the model. Adequacy is left open here because no test case names any of these behaviors, and the report says so under `what keeps it open`: each line is a position it could not answer for and why. `unaffected by a wider run` means running more of what is written would not settle these — what they wait on is a test case, not a longer search.
 
-The nine `not derivable` lines include the `Option` fields as `app.actualExpense@Some` and so on: an optional field is a position the report reaches only where a value is there.
+The nine `divided no way` lines include the `Option` fields as `app.actualExpense@Some` and so on: an optional field is a position the report reaches only where a value is there. `divided no way` says the rules of the behavior put no class boundary across the position, so there is nothing for a test case to be on one side or the other of.
 
 ## 2. Modeling States as Types
 
@@ -273,10 +284,10 @@ example submitTrip
   submitTrip               injected      rows 2    pending 2
     signature   out specified 2/2  observed 0/2  verified 0/2
     partition   not applicable (the rules of this behavior divide no position)
-      · not derivable: app.applicantID
-      · not derivable: app.destination
-      · not derivable: app.estimatedExpense
-      · not derivable: submittedAt
+      · divided no way: app.applicantID
+      · divided no way: app.destination
+      · divided no way: app.estimatedExpense
+      · divided no way: submittedAt
     border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
 
@@ -307,20 +318,25 @@ let submitTrip (app, submittedAt) =
   submitTrip               implemented   rows 2    pending 0
     signature   out specified 2/2  observed 2/2  verified 2/2
     partition   axes 1   equivalence partitions 2/2
-      · not derivable: app.applicantID
-      · not derivable: app.destination
-      · not derivable: submittedAt
-    border      borders 1   coverage items 2/4
-      ! no row is at the ON point submitTrip/app.estimatedExpense = 100001 (comparison@32:35)
-      ! no row is at the OFF point submitTrip/app.estimatedExpense = 100000 (comparison@32:35)
+      · divided no way: app.applicantID
+      · divided no way: app.destination
+      · divided no way: submittedAt
+    border      borders 1   obligations 2/4
+      ! no row is at the ON point (comparison@32:35)
+          · read as submitTrip/app.estimatedExpense: = 100001
+      ! no row is at the OFF point (comparison@32:35)
+          · read as submitTrip/app.estimatedExpense: = 100000
     branch      2/2
+    decision    rules 2   taken 2
 
 1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: not satisfied
 2 gaps marked `!`: what a strict build refuses over.
 ```
 
-Now all four report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `border coverage items 2/4` names the two points no test case stands at: 100001, the first value the condition sends to pre-approval, and 100000, the last one below it. Both are marked `!`, which is what `--strict` refuses over and what the count on the last line is of. `comparison@32:35` is where the line was drawn — the comparison itself, not the `if` it was written in.
+Now the report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `border obligations 2/4` names the two points no test case stands at: 100001, the first value the condition sends to pre-approval, and 100000, the last one below it. Each names where the line was drawn, `comparison@32:35` — the comparison itself, not the `if` it was written in — and the line under it reads the point back as a value of a position, `submitTrip/app.estimatedExpense`. Both are marked `!`, which is what `--strict` refuses over and what the count on the last line is of.
+
+`decision rules 2   taken 2` is about the body rather than the inputs: the `if` states two rules, and a test case goes through each.
 
 Whether 100000 belongs to pre-approval or direct submission must be confirmed against the business rules.
 
@@ -344,37 +360,38 @@ if app.estimatedExpense.value >= 100000
 Generate boundary test scaffolds:
 
 ```bash
-souther examples businesstrip.sou --generate --boundaries
+souther examples businesstrip.sou --generate
 ```
 
 The report comes out first, and the rows follow it:
 
 ```
 // generated by `souther examples --generate`: 2 rows to fill what nothing covers.
-// Replace each `<?>` with what the system actually answers, then uncomment.
-// example submitTrip
-//     | (
-//         Draft {
-//             applicantID = EmployeeID("x"),
-//             destination = "x",
-//             estimatedExpense = Amount(100000)
-//         },
-//         DateTime("2000-01-01T00:00:00")
-//     )
-//         -> <?>
-//     | (
-//         Draft {
-//             applicantID = EmployeeID("x"),
-//             destination = "x",
-//             estimatedExpense = Amount(99999)
-//         },
-//         DateTime("2000-01-01T00:00:00")
-//     )
-//         -> <?>
+// Replace each `<?>` with what the system actually answers.
+example submitTrip
+    | (
+        Draft {
+            applicantID = EmployeeID("x"),
+            destination = "x",
+            estimatedExpense = Amount(100000)
+        },
+        DateTime("2000-01-01T00:00:00")
+    )
+        -> <?>
+    | (
+        Draft {
+            applicantID = EmployeeID("x"),
+            destination = "x",
+            estimatedExpense = Amount(99999)
+        },
+        DateTime("2000-01-01T00:00:00")
+    )
+        -> <?>
 ```
 
-The inputs are written for you; `<?>` is not, and the generator gives the rows no names. Uncomment
-them, name each case, and fill in the expected output from the business rules:
+The inputs are written for you; `<?>` is not, and the generator gives the rows no names. `<?>` is a
+row whose answer is owed: paste these in and the report counts them as rows waiting for one. Name
+each case and fill in the expected output from the business rules:
 
 ```
 | "Exactly 100,000 JPY requires pre-approval" :
@@ -391,11 +408,12 @@ them, name each case, and fill in the expected output from the business rules:
   submitTrip               implemented   rows 4    pending 0
     signature   out specified 2/2  observed 2/2  verified 2/2
     partition   axes 1   equivalence partitions 2/2
-      · not derivable: app.applicantID
-      · not derivable: app.destination
-      · not derivable: submittedAt
-    border      borders 1   coverage items 4/4
+      · divided no way: app.applicantID
+      · divided no way: app.destination
+      · divided no way: submittedAt
+    border      borders 1   obligations 4/4
     branch      2/2
+    decision    rules 2   taken 2
 
 1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: satisfied
@@ -507,7 +525,7 @@ data Destination = String
     invariant String.length(value) >= 1
 ```
 
-Invariants add border points to `souther examples`: a minimum string length or a non-negative amount becomes a point some test case has to stand at.
+Invariants add border points to `souther examples`: a minimum string length or a non-negative amount becomes a point some test case has to stand at. They are reported under `declarations` rather than under the behavior, because a rule about a value is owed a row wherever that value is constructed rather than in one behavior.
 
 Add boundary test cases for 0 JPY and single-character strings to satisfy the report's coverage requirements.
 
@@ -676,7 +694,7 @@ Add test cases asserting both successful transitions and rejection outputs (`Una
 
 What You Will Learn: Read gaps in the report's partition and border metrics to determine missing test scenarios. Use `--strict` in CI.
 
-Update: Add a test case for final approval on pre-approved applications. Review `--behavior`, `--generate --boundaries`, and `--strict` flags.
+Update: Add a test case for final approval on pre-approved applications. Review `--behavior`, `--generate`, and `--strict` flags.
 
 Filter reports for a single behavior:
 
@@ -688,17 +706,31 @@ souther examples businesstrip.sou --behavior finalApprove
   finalApprove             implemented   rows 2    pending 0
     signature   out specified 2/2  observed 2/2  verified 2/2
     partition   axes 6   equivalence partitions 6/20
-      · no row is in `GeneralEmployee` at app.applicant.role
-      · no row is in `PreApprovedRecord` at app.preApproval
-    combination pairs 15 reached / 15 known reachable, 149 untried
-    border      borders 24   coverage items 9/48   excluded 48
+      ! no row is in `Manager` at app.applicant.role
+      ! no row is in `PreApprovedRecord` at app.preApproval
+      · app.applicant.role holds 2 classes and this behavior's rules compose 0 of them
+      · no line: comparison@195:22 — it relates two positions rather than dividing one, about `approverID`
+    combination pairs 15 covered, 149 unknown; no row is owed at one
+      · app.applicant.role × app.preApproval: 1 covered, 3 unknown
+    border      borders 24   obligations 0/0
     branch      4/7
+      ! no row goes through `case AdvancePayment` (139:13)
+    decision    rules 2   taken 2
+  declarations   obligations 6/20
+  Amount
+      ! no row is at the ON point value = 0 (invariant Amount #1)
 ```
 
-The positions the report could not divide, and the border and branch items it names one by one, are
-left out above. The counts depend on the types you defined in Section 8, so yours will differ.
+The rest of the positions, pairs, border points and branch cases the report names one by one are left
+out above. The counts depend on the types you defined in Section 8, so yours will differ.
 
 `no row is in PreApprovedRecord` highlights that no test case evaluates final approval for an application that went through pre-approval. Adding that scenario covers the missing path.
+
+`no line: comparison@195:22 — it relates two positions rather than dividing one` is the report
+declining to invent a class boundary: `approverID == app.applicant.managerID` compares two inputs, so
+neither side has a value the other can be measured against. `border obligations 0/0` says the same of
+this behavior's own lines, while the invariants of the types it reaches are counted under
+`declarations`, where a rule about a value is owed a row wherever that value is constructed.
 
 Treat these gaps as questions about the model, not merely a coverage target. A missing partition can reveal a business case that has not been decided, and a missing border can reveal an ambiguous rule. The report helps turn those questions into the next conversation with a domain expert and the next executable example.
 
