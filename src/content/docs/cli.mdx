@@ -1,0 +1,705 @@
+---
+title: Command line
+description: Every souther command, what it takes, and what it prints.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page lists every `souther` command, the options that matter, and one worked example for each.
+It is for anyone who runs the compiler from a shell, a script, or a CI job.
+
+```sh
+souther <command> [options] [args]
+```
+
+The help text is built from the same table the compiler reads an option from, so it describes the
+binary you are running. `souther help` lists the commands. `souther help <command>` describes one
+command. `souther doc cli/commands` prints the full reference for every command.
+
+```sh
+souther help
+```
+
+```text
+usage: souther <command> [options] [args]
+
+commands:
+  init      start a project, or add Souther to one
+  compile   compile to .class files, or for an installed target
+  run       run one behavior and print its output
+  fmt       format source, to stdout or in place
+  examples  how well the `example`s cover the model
+  doc       read the language specification
+  api       the stdlib surface and its signatures
+  japi      a dependency jar's public API, with javadoc
+  mcp       serve doc, api and japi over MCP stdio
+  lsp       serve the language server over LSP stdio
+  tooling   what an editor needs to start and configure the server, as JSON
+  help      what a command takes, and what its options mean
+  version   which Souther this is
+```
+
+Five options are shared. `--help` and `--version` work on every command. The other three work on
+`compile`, `run` and `examples`, and `--lang` also on `init`.
+
+| Option | Meaning |
+| --- | --- |
+| `--format human\|json` | How to render a compile error. Default `human`. |
+| `--lang <tag>` | Message locale, such as `ja` or `en`. Overrides `SOUTHER_LANG`. |
+| `--color auto\|always\|never` | Color the human output. Refused together with `--format json`. |
+| `--help`, `-h` | Print what the command takes. |
+| `--version` | Print which Souther this is. |
+
+Every command exits with `0` on success. A compile error, a formatting difference under
+`fmt --check`, and a gap under `examples --strict` exit with `1`. A wrong command line, a target
+that is not installed, and a `.souther-version` that names another Souther exit with `2`.
+
+## init
+
+Writes a new project, or adds Souther to a project that already has a `pom.xml` or a
+`build.gradle.kts`.
+
+```sh
+souther init [options] [<groupId>:<artifactId>]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-d, --dir <path>` | Where to write the project. Default: the artifactId. |
+| `--build maven\|gradle\|none` | Which build file to write. Default `maven`. |
+| `--model none\|minimal\|full` | How much of a model to start with. Default `full` when creating. |
+| `--module <name>` | The `.sou` module header. Default: the coordinate. |
+
+The command is never interactive and never overwrites a file. A second run writes what the first
+one left out and names the files it left alone.
+
+```sh
+souther init com.example:hello
+```
+
+```text
+    created  hello/pom.xml
+    created  hello/.gitignore
+    created  hello/src/main/souther/hello.sou
+             module com.example.hello
+
+    cd hello && mvn compile
+```
+
+The module name follows the coordinate. A hyphen in the artifactId becomes an underscore, so
+`com.acme:billing-service` writes `module com.acme.billing_service`. The `full` model is a small
+library desk with `data`, `invariant`, `behavior`, `constructs`, `guard` and the `example` rows that
+cover it, so `souther examples` has something to report on the first run.
+
+`--build none` is for a project with no Java build, one that compiles for WebAssembly or native
+code. It takes no coordinate. It writes the source and a `.souther-version` file holding the exact
+version of the Souther that ran it.
+
+```sh
+mkdir rules && cd rules
+souther init --build none
+```
+
+```text
+    created  .souther-version
+    created  src/main/souther/rules.sou
+             module rules
+
+    souther compile --target <target> <arguments>...
+```
+
+`compile`, `run`, `fmt` and `examples` read the nearest `.souther-version` above the working
+directory. Under one that names another Souther they refuse to run and exit with `2`.
+
+```text
+`<path>/.souther-version` requires Souther 0.9.9, and this is Souther 0.4.0
+```
+
+The message prints the file's absolute path.
+
+## compile
+
+Type-checks the files together, resolves imports across them, and writes `.class` files.
+
+```sh
+souther compile [options] <file.sou>...
+souther compile --target <target> <target-arguments>...
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-d, --dir <path>` | Where the generated `.class` files go. |
+| `-cp, --class-path <path>` | Where to find modules another project compiled. |
+| `--adequacy off\|witness\|all` | How much of the model to measure and warn about. Default `off`. |
+| `--warnings report\|error` | `error` refuses a compile that warns and writes nothing. Default `report`. |
+| `--format human\|json` | How to render a compile error. |
+| `--target <name>` | Compile for an installed backend instead of the JVM. Must be the first argument. |
+
+```sh
+souther compile src/main/souther/hello.sou -d out
+```
+
+```text
+wrote out/com/example/hello/$Module.class
+wrote out/com/example/hello/LoanDays.class
+wrote out/com/example/hello/LoanDays$Ctfe.class
+...
+```
+
+One line is printed per class, with the absolute path, shortened here. The `full` model from
+`souther init` writes 35 of them: one class
+per `data` and per `behavior`, plus the derived decoders and encoders. The classes land under the
+module's package, so `module com.example.hello` writes to `out/com/example/hello/`.
+
+A compile error exits with `1` and prints the code, the position, the offending line and a hint.
+`souther doc <code>` explains any code the compiler prints.
+
+```text
+-- MODULE ERROR  E1611 -----------------------broken.sou:6:1
+
+6| behavior total : (p: Price) -> Totl
+   ^
+
+`behavior total` has no `let`, so it is implemented outside this module, and its output `Totl` is not in `exposing`.
+Hint: The base class an implementation extends is public whatever `exposing` says, and the implementation writes this type where it overrides `apply`. Add `Totl` to `exposing`.
+```
+
+`--adequacy all` runs the `example` rows and reports what they do not cover as warnings, with the
+same codes `souther examples` marks. `--warnings error` turns every warning into a refusal and
+writes no classes.
+
+`--target` is read only as the first argument. `jvm` is built in and is what a line without
+`--target` means. Any other name is an installed backend, and everything after the name belongs to
+that backend. `souther compile --target wasm --help` asks the wasm backend what it takes.
+
+```sh
+souther compile --target wasm --help
+```
+
+```text
+souther compile --target wasm — compiles a Souther program to WebAssembly
+
+  souther compile --target wasm <source or directory>... -o <file> [--component]
+      [--wit <file>]
+
+  -o <file>     where to write. Required.
+  --component   write a component, one interface per Souther module, rather than a
+                core module. A behavior crosses as func(arguments: string) -> string.
+  --wit <file>  also write what the program offers, as a reader of interfaces reads
+                it. The same whether a component is written or not.
+
+A directory is read for the .sou files under it, in the order their paths sort.
+```
+
+A backend is an executable jar, or a link to one, under `$SOUTHER_HOME/backends`. A package
+manager's launcher can name another directory with `-Dsouther.backends`. Each jar carries
+`META-INF/souther/backend.properties` with two keys. `name` is the target the jar answers to.
+`souther.version` is the Souther it was built against, and it must equal the version of the
+`souther` that is running. Jars for several Souther versions can sit side by side. Two jars with
+the same pair in one directory are refused. A target that is not installed exits with `2`.
+
+```sh
+souther compile --target nope rules.sou
+```
+
+```text
+no target `nope` is installed; installed: wasm
+```
+
+The backend runs as a process of its own under the same `java`, with the JVM arguments
+`souther tooling` lists. Its exit status is the command's exit status.
+
+<Aside type="note">
+Most of what a small compile costs is the JVM loading the compiler's classes. The first compile
+writes a class-data archive under `~/.cache/souther`, named for the version, and later compiles
+start from it. The directory honors `XDG_CACHE_HOME`. Deleting the archive costs one slower compile.
+An archive belongs to the binary and the JDK that wrote it, so delete it after replacing either.
+</Aside>
+
+## run
+
+Compiles one file in memory, applies one behavior to JSON input, and prints the JSON result.
+
+```sh
+souther run [options] <file.sou>
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--behavior <name>` | Which behavior to run. Default: the only runnable one. |
+| `--input <json>` | The behavior's input, as JSON. |
+| `-cp, --class-path <path>` | Where to find modules another project compiled. |
+| `--format human\|json` | How to render a compile error. |
+
+A behavior is runnable when it has a `let` and depends on nothing injected, or when it is a `>->`
+pipeline whose stages are all runnable. It must also be exposed. A file with no `exposing` list
+exposes everything in it, and a single file may omit the `module` header. An injected behavior, one
+with injected dependencies, and a module that exposes nothing runnable are refused with the reason.
+
+```text
+no behavior in this module can be run. `run` runs a behavior that is runnable — implemented in Souther and needing nothing injected, a `>->` pipeline when every stage is — and that the module exposes.
+```
+
+Without `--behavior`, a module with exactly one runnable behavior runs it. With several, the run
+stops with exit `2` and lists them.
+
+```text
+several behaviors can be run — pick one with --behavior: double, triple
+```
+
+How `--input` is written depends on how many parameters the behavior takes.
+
+| Parameters | What `--input` holds |
+| --- | --- |
+| none | Nothing. Omit `--input`. |
+| one | The argument itself, not wrapped in an array. |
+| two or more | A JSON array with one element per parameter, in order. |
+
+Each element is decoded through the parameter type's derived decoder. A newtype is written bare,
+a record is an object with its field names, and a date is a string such as `"2026-04-10"`. The
+`returnBook` behavior that `souther init` writes takes four parameters.
+
+```sh
+souther run src/main/souther/hello.sou \
+  --input '["Souther in Action", "2026-04-01", 14, "2026-04-10"]'
+```
+
+```text
+{"title":"Souther in Action","lentFor":14,"type":"Returned"}
+```
+
+A failure case comes back the same way, as a value with its `type`.
+
+```sh
+souther run src/main/souther/hello.sou --input '["", "2026-04-01", 14, "2026-04-10"]'
+```
+
+```text
+{"type":"NoTitle"}
+```
+
+An array of the wrong length stops the run with exit `1`.
+
+```text
+`returnBook` takes 4 inputs — --input must be a JSON array of that length
+```
+
+A file that imports another user module needs `-cp`. Compile that module first and name the
+directory its classes went to.
+
+```sh
+souther compile catalog.sou -d out
+souther run enrollment.sou -cp out --behavior register --input '"c-1"'
+```
+
+`souther doc cli/run` has the full description of the input encoding.
+
+## examples
+
+Reports how well the `example` rows cover the model.
+
+```sh
+souther examples [options] <file.sou>...
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--behavior <name>` | Report only this behavior. |
+| `--module <name>` | Report only this module. |
+| `--generate` | Print example rows for what nothing covers, with the answers left blank. |
+| `--strict` | Exit non-zero on a gap the report marks. |
+| `-cp, --class-path <path>` | Where to find modules another project compiled. |
+| `--format human\|json` | How to render the report. |
+
+This small model has a sum input, a comparison, and two rows.
+
+```sou
+module shop.discount exposing ( Customer, Member, Guest, Percent, discountFor )
+
+data Member
+data Guest
+data Customer = Member | Guest
+
+data Percent = Int
+    invariant value >= 0 && value <= 100
+
+behavior discountFor : (customer: Customer, amount: Int) -> Percent
+    constructs Percent
+
+let discountFor (customer, amount) = {
+    match customer with
+        | Member -> if amount >= 10000 then Percent(10) else Percent(5)
+        | Guest  -> Percent(0)
+}
+
+example discountFor
+    | "a member on a large order" : (Member, 10000) -> Percent(10)
+    | "a guest"                   : (Guest, 500)    -> Percent(0)
+```
+
+```sh
+souther examples discount.sou
+```
+
+```text
+shop.discount                                            measurement: complete
+  discountFor              implemented   rows 2    pending 0
+                in #1 specified 2/2
+    partition   axes 2   equivalence partitions 4/4
+    combination pairs 2 covered, 2 uncovered
+      ! no row is in `amount/x < 10000` at discountFor/amount with `Member` at discountFor/customer
+      ! no row is in `amount/10000 <= x` at discountFor/amount with `Guest` at discountFor/customer
+    border      borders 1   obligations 1/4
+      ! no row is at the OFF point (comparison@15:31)
+          · read as discountFor/amount: = 9999
+      ! no row is at an IN point (comparison@15:31)
+          · read as discountFor/amount: in 10000 < amount
+      ! no row is at an OUT point (comparison@15:31)
+          · read as discountFor/amount: in amount < 9999
+    branch      3/4
+      ! no row goes through `else` (15:21)
+    decision    rules 3   taken 2
+      ! no row takes a decision rule
+          · it goes through `case Member` (14:5)
+          · the comparison at 15:31 does not hold
+    replacement 3/3
+
+1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
+adequacy: not satisfied
+7 gaps marked `!`: what a strict build refuses over.
+```
+
+Read the report from the top. The first line names the module and says how much of the measuring
+could be made. `complete` means every measure came to an answer. Each behavior then gets a block
+with one line per measure.
+
+`partition` divides each input position by the behavior's own rules. `customer` has two cases and
+`amount` is split at 10000, so there are two axes and four partitions. `combination` asks which
+pairs of partitions a row stands in. `border` lists the lines the comparisons draw and the four
+rows each line is owed: one on the line, one a step outside it, one well inside and one well outside.
+`branch` counts the arms a row goes through. `decision` counts the rules of the body, where a rule
+is one path through the arms and comparisons. `replacement` asks whether any row would come out
+differently if an arm were rewritten as a sibling arm. A gap on that line is warning `E1939`, and
+`souther doc E1939` explains it.
+
+A line under `!` is a gap. `--strict` exits with `1` over exactly those, and `souther compile
+--adequacy all --warnings error` refuses the same set. A line under `·` is something measured and
+named but not refused over, such as a hint on how to read a border or a position the rules divide no
+way.
+
+The report closes with two answers. The count line says how many behaviors are implemented,
+unimplemented or injected, and how many rows are waiting for a `let`. Waiting rows are never a gap.
+The `adequacy` line is `satisfied`, `not satisfied` or `undetermined`. It is `undetermined` when a
+measure that could find a gap could not be made, and the report then lists what keeps each open
+position open and whether a wider search or only a new row would close it. A limit of the compiler
+is never reported as an answer about the model.
+
+A model with injected behaviors adds two things. An injected behavior has no body, so most measures
+are `not applicable`. A `declarations` block at the end lists the invariants of the types the
+behaviors construct, and each invariant is owed a row at its border.
+
+```text
+  declarations   obligations 1/2
+  Sku
+      ! no row is at the ON point String.length(value) = 1 (invariant Sku #1)
+
+3 behaviors: 1 implemented, 0 unimplemented, 2 injected; 1 row waiting for a `let`.
+```
+
+`--generate` prints the report and then the rows for what nothing covers. The inputs are filled in
+and each answer is left as `<?>`. Paste the block at the end of the file and replace
+each `<?>` with what the behavior returns.
+
+```sh
+souther examples discount.sou --generate
+```
+
+```text
+// generated by `souther examples --generate`: 4 rows to fill what nothing covers.
+// Replace each `<?>` with what the system actually answers.
+example discountFor
+// fills else
+// fills amount=x < 10000
+// fills customer=Member
+    | (Member, 9999)  -> <?>
+// fills amount=10000 <= x
+// fills customer=Guest
+    | (Guest, 10000)  -> <?>
+    | (Member, 10001) -> <?>
+    | (Member, 9998)  -> <?>
+```
+
+`--strict` is the form a build takes. The report is the same. Only the exit code changes.
+
+```sh
+souther examples discount.sou --strict
+```
+
+```text
+7 gap(s) marked `!` above: the rows do not cover the model.
+```
+
+`--format json` prints the same report as one JSON document with a `schemaVersion`. Every finding
+carries a `kind` and a `disposition` of `refused`, `reported` or `undecided`.
+
+## fmt
+
+Prints the canonical form of a file, rewrites it in place, or checks it.
+
+```sh
+souther fmt [options] <file.sou>...
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-w, --write` | Write the formatted source back in place. |
+| `--check` | Write nothing. Exit `1` on a file that is not formatted. |
+
+The layout is derived from the syntax tree, so there is one form per program and nothing to
+configure. Paragraph breaks and comment placement are kept. Everything else is derived. Lines are at
+most 100 columns and a nesting level is 4 spaces.
+
+`--check` reports each difference as the rule it departs from, the place in your source, and the two
+forms. A file already in canonical form is not mentioned.
+
+```sh
+souther fmt --check unformatted.sou
+```
+
+```text
+unformatted.sou:7:19: a construct written down the page writes its members one to a line
+    the canonical form: one line ends here; this source: no line ends here
+unformatted.sou:15:16: what goes between two tokens on a line
+    the canonical form: ` `; this source: `  `
+```
+
+`souther doc cli/commands/fmt-report-vocabulary` lists every rule a line can name.
+
+## doc
+
+Reads the language specification and the documentation that bundled libraries ship.
+
+```sh
+souther doc [options] [<anchor> | <error-code> | <set>/<topic>[/<section>]]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--search <term>` | Sections and topics that say the term, best answer first. |
+| `--limit <n>` | With `--search`, how many hits to show. Default 20, `0` for all. |
+
+With no argument it lists every section and topic as `name<TAB>title`. The specification is
+bundled in the jar, so it is the one the compiler was built from. Every diagnostic code is the name
+of the section that explains it, in either case.
+
+```sh
+souther doc | grep cli/
+```
+
+```text
+cli/start-here	Start here
+cli/commands	The `souther` command
+cli/commands/init	  init
+cli/commands/compile	  compile
+cli/commands/project-version	  .souther-version
+cli/commands/run	  run
+cli/commands/fmt	  fmt
+cli/commands/fmt-report-vocabulary	    The words the report uses
+cli/commands/examples	  examples
+cli/commands/doc	  doc
+cli/commands/api	  api
+cli/commands/japi	  japi
+cli/commands/mcp	  mcp
+cli/commands/lsp	  lsp
+cli/commands/help	  help
+cli/commands/version	  version
+cli/commands/shared-options	  Options every command shares
+cli/run	Running a behavior: `souther run`
+```
+
+A search tries three things in turn. If the term is a name, that one document is the answer. If the
+documents say the term as written, they are listed. Otherwise they are listed by how many of the
+term's words each one says.
+
+```sh
+souther doc --search "class path" --limit 3
+```
+
+```text
+published-modules	Importing a module another project compiled
+    resolved against the compiled modules on the class path.
+e1509	A module on the path cannot be read back
+    Module `example.employee` is on the class path, and this compiler cannot read what it published.
+invariant-expressions	Expressions allowed / forbidden in an invariant
+    …ts`, which is why that module is on its class path (published-modules).
+… 2 more; `--limit 0` for all of them
+```
+
+New to the language? `souther doc cli/start-here` names four sections to read and the order to read
+them in.
+
+## api
+
+Prints the standard library's published surface with the signatures the type checker resolved.
+
+```sh
+souther api [options] [<Module>[.<name>]]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--search <term>` | The published names whose signature or document says the term. |
+| `--source <Module>` | A stdlib module's own source, design comments included. |
+
+With no argument it prints everything, which is about 150 lines. A module name prints one module. A
+qualified name prints one signature.
+
+```sh
+souther api Option.map
+```
+
+```text
+Option.map(f: ('a) -> 'b, opt: 'a?) : 'b?
+`souther api --source Option` for what it means
+```
+
+```sh
+souther api --search fold
+```
+
+```text
+Map.fold(step: ('acc, 'k, 'a) -> 'acc, seed: 'acc, m: Map<'k, 'a>) : 'acc
+List.foldRight(step: ('a, 'acc) -> 'acc, seed: 'acc, xs: List<'a>) : 'acc
+List.fold(step: ('acc, 'a) -> 'acc, seed: 'acc, xs: List<'a>) : 'acc
+Set.fold(step: ('acc, 'a) -> 'acc, seed: 'acc, s: Set<'a>) : 'acc
+```
+
+## japi
+
+Prints a dependency jar's public API, read from its class files without loading them, with javadoc
+taken from the `-sources.jar` beside the jar.
+
+```sh
+souther japi [options] <class-or-package>[#<member>]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-cp, --class-path <path>` | Where to find the jar to read. |
+
+A class name prints every published member. `Class#member` prints one of them, which is what a
+class with many overloads of one name needs. A compile-time constant is printed with its value.
+Reading javadoc needs a JDK rather than a JRE, because the sources are parsed with the Java
+compiler.
+
+```sh
+souther japi 'net.unit8.raoh.Result#map2' \
+  -cp ~/.m2/repository/net/unit8/raoh/raoh/0.9.0/raoh-0.9.0.jar
+```
+
+```text
+public interface net.unit8.raoh.Result<T> {
+
+  /**
+   * Combines two independent results, accumulating errors from both if either fails.
+   *
+   * <p>Unlike {@link #flatMap}, both {@code ra} and {@code rb} are evaluated regardless of
+   * whether the other succeeds. If both fail, the issues from both are merged.
+   ...
+   */
+  public static <A, B, C> net.unit8.raoh.Result<C> map2(net.unit8.raoh.Result<A> ra, net.unit8.raoh.Result<B> rb, java.util.function.BiFunction<? super A, ? super B, ? extends C> f)
+}
+```
+
+The javadoc is shortened here. The command prints the whole comment, parameters included.
+
+The runtime's own classes need no `-cp`. `souther japi souther.runtime.Result` reads them from the
+binary.
+
+## lsp
+
+Serves the language server over the Language Server Protocol on stdio.
+
+```sh
+souther lsp
+```
+
+It provides diagnostics, the document outline, hover, go-to-definition, find-references, name
+completion, quick-fix code actions, rename, formatting, code lenses and semantic tokens. Names are
+resolved over the workspace the client announces. Nothing but the protocol goes to stdout. A refusal
+to start goes to stderr.
+
+This is the same server the `souther-lsp.jar` from a release runs, in the compiler's own process.
+See [Editors and agents](/editors/) for connecting an editor to it.
+
+## mcp
+
+Serves the `doc`, `api` and `japi` answers over the Model Context Protocol on stdio.
+
+```sh
+souther mcp
+```
+
+The tools are `doc_search`, `doc_read`, `stdlib_api`, `stdlib_api_search`, `stdlib_api_source` and
+`jar_api`. `doc_read` with no `name` lists every section and topic, which is where a client with
+nothing else starts. A long answer arrives in parts of at most 16,000 characters, each ending with a
+`cursor` to ask for the next part. See [Editors and agents](/editors/) for the client configuration.
+
+## tooling
+
+Prints what an editor needs to start and configure the language server.
+
+```sh
+souther tooling
+```
+
+```json
+{
+  "compilerVersion": "0.4.0",
+  "language": {
+    "id": "souther",
+    "extensions": [".sou"]
+  },
+  "runtime": {
+    "java": {
+      "minimumFeature": 25,
+      "requiredJvmArgs": ["-Xss4m"]
+    }
+  },
+  "contracts": {
+    "syntax": {
+      "resource": "META-INF/souther/syntax/"
+    },
+    "lspInitializationOptions": {
+      "schemaVersion": 1,
+      "resource": "META-INF/souther/lsp/initialization-options-1.schema.json"
+    }
+  }
+}
+```
+
+The same file is inside the compiler jar and the `souther-lsp.jar` as
+`META-INF/souther/tooling.json`, so a client can read it before it has a Java to run anything with.
+
+## version
+
+Prints which Souther this is.
+
+```sh
+souther version
+```
+
+```text
+souther 0.4.0
+```
+
+`souther --version` and `--version` after any command print the same line. The version is read
+from the jar's manifest. A build run from class files has none and prints `unreleased`. The same
+reading is what `lsp` and `mcp` report as their `serverInfo`.
+
+## Next steps
+
+- [Build plugins](/build/) compile `.sou` under `src/main/souther` as part of a Maven or Gradle build.
+- [Editors and agents](/editors/) connect VS Code, other editors and coding agents to `souther lsp` and `souther mcp`.

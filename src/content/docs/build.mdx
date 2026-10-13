@@ -1,0 +1,184 @@
+---
+title: Build plugins
+description: Compile .sou files inside a Maven or Gradle build, or without a Java build at all.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page shows how a build compiles the `.sou` files under `src/main/souther` into classes before
+`javac` runs, so Java, Kotlin or Clojure written beside the model compiles against the generated
+types. It is for anyone adding Souther to a project with a build.
+
+`souther init` writes either build for you. The sections below show what it writes and what each
+plugin checks.
+
+## Maven
+
+The plugin is `org.souther-lang:souther-maven-plugin`. Its `compile` goal is bound to
+`process-sources`, so it runs before `javac`. Generated classes go to `target/classes`, and the
+jar and the test compilation read them without being told to.
+
+```xml
+<properties>
+  <maven.compiler.release>25</maven.compiler.release>
+  <souther.version>0.4.0</souther.version>
+</properties>
+
+<dependencies>
+  <dependency>
+    <groupId>org.souther-lang</groupId>
+    <artifactId>souther-runtime</artifactId>
+    <version>${souther.version}</version>
+  </dependency>
+</dependencies>
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.souther-lang</groupId>
+      <artifactId>souther-maven-plugin</artifactId>
+      <version>0.2.0</version>
+      <executions>
+        <execution>
+          <goals><goal>compile</goal></goals>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+```
+
+The `souther-runtime` dependency chooses the Souther. The plugin reads its version and compiles
+the model with that Souther, so there is one version and one place it is written. A pom that
+declares no runtime is refused. Leave the scope out: a project that depends on yours compiles
+against the generated classes, and their signatures name the runtime.
+
+The compiler is not on the plugin's class path. The version names
+`org.souther-lang:souther-build-driver`, which Maven resolves from the repositories the project
+already uses and runs in a class loader of its own. The plugin itself names no Souther version, so
+moving `souther.version` is all it takes to compile with a newer release.
+
+| Parameter | Property | Default |
+| --- | --- | --- |
+| `sourceDirectories` | `souther.sourceDirectories` | `${project.basedir}/src/main/souther` |
+| `languageTag` | `souther.lang` | What `souther --lang` gets when nothing names one |
+
+Importing a module another project compiled takes an ordinary dependency. The module is read from
+the dependency's classes, so no `.sou` is shared.
+
+```sou
+module app.orders exposing ( Order )
+
+import shared.money ( Amount )
+
+data Order = { total: Amount }
+```
+
+The [examples repository](https://github.com/souther-lang/examples) sets the plugin once in its
+root `pom.xml` for every module.
+
+<Aside type="note">
+The plugin repository's README documents version 0.2.0, where the runtime dependency is the only
+place the Souther version is written. Earlier plugin releases took a `southerVersion` configuration
+parameter instead. The 0.2.0 plugin does not read it.
+</Aside>
+
+## Gradle
+
+The plugin is `org.souther-lang.souther`. It compiles `src/main/souther` into the `main` source
+set, so the generated classes reach the Kotlin or Java compilation, the test class path and the
+jar. The task is `compileSouther`.
+
+```kotlin
+plugins {
+    java
+    id("org.souther-lang.souther") version "0.2.0"
+}
+
+souther {
+    southerVersion = "0.4.0"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+```
+
+`southerVersion` has no default. A project with a `.sou` file and no version is stopped rather
+than compiled with a version it never named. The runtime is added at that same version, so
+`souther-runtime` is not declared in `dependencies`. `latest.release` is a version like any other.
+
+Editing a `.sou` re-runs the compile. The build works with the configuration cache.
+
+| Setting | Default |
+| --- | --- |
+| `southerVersion` | None. A project with a model names it. |
+| `sourceDirectory` | `src/main/souther` |
+| `language` | What `souther --lang` gets when nothing names one |
+
+Importing another project's model is a project dependency.
+
+```kotlin
+dependencies { implementation(project(":money")) }
+```
+
+The `issuetracker` module of the examples repository is the Kotlin case. Kotlin has no JVM target
+25 yet, and Gradle refuses a Java and a Kotlin target that differ, so that build sets both to an
+older target. The generated classes and `souther-runtime` are Java 25 class files, so the JVM that
+runs the application is still Java 25.
+
+## Annotation processor
+
+`SoutherProcessor` is a `javac` annotation processor that compiles `.sou` files as a side effect
+of an ordinary Java compilation. Point it at a directory or a file with
+`-Asouther.source=<path>`. It is found the standard way: Maven `annotationProcessorPaths`, Gradle
+`annotationProcessor`, or `javac -processorpath`. With no `souther.source` option it does nothing.
+
+Use it where there is Java to compile and no plugin to add. The examples repository drives it from
+Clojure in the `account` module, through `souther-clj` and the JDK compiler API.
+
+The processor has two limits the plugins do not. `javac` starts no processing round when a
+compilation has no Java source, so a module written only in Souther needs one Java file for the
+processor to run. And the Maven compiler plugin's incremental check reads Java sources only, so a
+`.sou` edited without `clean` is not recompiled.
+
+## Projects without a Java build
+
+A project that compiles for WebAssembly or native code needs no Maven or Gradle.
+
+```sh
+souther init --build none
+```
+
+This writes the source under `src/main/souther` and a `.souther-version` file holding one line:
+the exact version of the Souther that ran it. `compile`, `run`, `fmt` and `examples` read the
+nearest `.souther-version` above the working directory and refuse to run under another Souther.
+A Maven or Gradle build does not read the file. Its build file names the Souther it runs.
+
+Compile with the target's own arguments after `--target`.
+
+```sh
+souther compile --target wasm src/main/souther -o rules.wasm
+```
+
+See [WebAssembly](/wasm/) and [Native](/native/) for installing a backend and what each one writes.
+
+## Where generated classes go
+
+Both plugins write where the rest of the build reads. Maven writes to `target/classes`. Gradle
+writes into the `main` source set's output. The command line writes under the directory `-d` names.
+In every case the classes land under the module's package, so `module com.example.hello` writes
+`com/example/hello/`.
+
+One class is written per `data` and per `behavior`, plus the derived decoders and encoders beside
+each type. Another project reads the module from those classes, so publishing the jar publishes the
+model.
+
+## Next steps
+
+- [Java](/java/) shows how the generated classes are called, how a behavior is bound to its injected dependencies, and how JSON crosses the boundary.
+- [Command line](/cli/) covers `souther compile` and `souther examples` outside a build.

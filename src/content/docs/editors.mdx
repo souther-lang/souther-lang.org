@@ -1,0 +1,161 @@
+---
+title: Editors and agents
+description: Connect VS Code, other editors and coding agents to the Souther language server and documentation tools.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page shows how an editor or a coding agent connects to the language server and reads the
+documentation the compiler carries. It is for anyone who writes `.sou` files somewhere other than a
+plain terminal.
+
+## VS Code
+
+Install the extension from the
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=souther.souther) or
+from Open VSX, then open a `.sou` file. Nothing else is required. The extension bundles the language
+server. If the machine has no Java 25, it offers to download a Temurin runtime into its own storage
+and uses it only for Souther.
+
+It provides diagnostics, the document outline, hover, go-to-definition, find-references, rename,
+name completion, quick-fix code actions, formatting and semantic tokens. The syntax highlighting is
+generated from the compiler's lexer, so it keeps up with the language.
+
+| Setting | What it does |
+| --- | --- |
+| `souther.adequacy` | How much of what the `example` rows cover to measure beside each behavior. `off` by default, `witness` reads what the compile already ran, `all` runs every row again. |
+| `souther.server.java` | The `java` to launch the server with. Empty means Java 25 from `JAVA_HOME`, the `PATH`, or the downloaded runtime. |
+| `souther.server.jar` | A different `souther-lsp.jar`, for a server you built yourself. |
+
+The status bar shows the server starting and turns into a check when it is ready. The commands
+`Souther: Restart Language Server` and `Souther: Show Output` are in the command palette.
+
+## Other editors
+
+Any editor that speaks the Language Server Protocol can run the server over stdio. Where the
+`souther` binary is on the path, start it as a subcommand. It needs no jar path and no stack flag.
+
+```sh
+souther lsp
+```
+
+Every release also attaches `souther-lsp.jar`, a self-contained server for a machine without the
+compiler. It needs Java 25 and a 4 MB thread stack.
+
+```sh
+java -Xss4m -jar souther-lsp.jar
+```
+
+Do not copy those values out of prose. Both jars carry `META-INF/souther/tooling.json`, which
+states the language id, the file extension, the minimum Java, the JVM arguments the server needs,
+and where the syntax contract and the options schema are inside the jar. `souther tooling` prints
+the same file.
+
+```sh
+souther tooling
+```
+
+```json
+{
+  "compilerVersion": "0.4.0",
+  "language": {
+    "id": "souther",
+    "extensions": [".sou"]
+  },
+  "runtime": {
+    "java": {
+      "minimumFeature": 25,
+      "requiredJvmArgs": ["-Xss4m"]
+    }
+  },
+  "contracts": {
+    "syntax": {
+      "resource": "META-INF/souther/syntax/"
+    },
+    "lspInitializationOptions": {
+      "schemaVersion": 1,
+      "resource": "META-INF/souther/lsp/initialization-options-1.schema.json"
+    }
+  }
+}
+```
+
+The schema describes the `souther` member of `initializationOptions`, which today holds one key,
+`adequacy`, with the values `off`, `witness` and `all`. A key the server does not read is ignored,
+and a value the schema does not allow is read as unset and reported with `window/showMessage`
+after `initialized`.
+
+The server's `initialize` answer lists what it provides: document sync, document symbols, hover,
+definition, references, completion on `.`, signature help, inlay hints, document highlight,
+selection ranges, workspace symbols, code actions, code lenses, formatting, rename and semantic
+tokens. Nothing but the protocol goes to stdout.
+
+## Documentation from the command line
+
+The `souther` binary answers questions about the language and its libraries itself. The
+specification it serves is the one it was built from, bundled in the jar.
+
+| Command | What it prints |
+| --- | --- |
+| `souther doc cli/start-here` | Four sections to read first, in order. |
+| `souther doc` | Every specification section and shipped topic, as `name<TAB>title`. |
+| `souther doc newtype` | One section, by its anchor. |
+| `souther doc E1918` | The section that explains a diagnostic code. |
+| `souther doc --search decoder` | Ranked hits, each with the line it matched on. |
+| `souther api` | The whole standard library with resolved signatures, about 150 lines. |
+| `souther api --search fold` | The published names that answer a term. |
+| `souther api --source Option` | A stdlib module's own source, design comments included. |
+| `souther japi net.unit8.raoh.Issues#add -cp raoh.jar` | One member of a dependency's public API, with javadoc. |
+
+A library may ship its own documentation inside its jar under `META-INF/souther-docs/`, and
+`souther doc` lists its topics beside the specification. The command line reference at
+`cli/commands` is carried that way. [Command line](/cli/) has the options of each command.
+
+## Coding agents
+
+`souther mcp` serves the same answers over the Model Context Protocol on stdio, for an agent
+harness that takes tools rather than shell commands. It answers under protocol revisions
+`2025-11-25` and `2025-06-18`.
+
+| Tool | What it answers |
+| --- | --- |
+| `doc_search` | Specification sections and library topics that say a term. |
+| `doc_read` | One section or topic. With no `name`, the whole listing. |
+| `stdlib_api` | The standard library surface. A module or a name narrows it. |
+| `stdlib_api_search` | Every published name that contains a term. |
+| `stdlib_api_source` | A stdlib module's own source. |
+| `jar_api` | A dependency jar's public API, with javadoc. |
+
+Register one command with the client.
+
+```json
+{ "mcpServers": { "souther": { "command": "souther", "args": ["mcp"] } } }
+```
+
+A long answer arrives in parts of at most 16,000 characters. Each part ends with how much is left
+and a `cursor`. The client asks the same tool again with the same arguments and that cursor.
+
+The two servers answer different questions. `souther mcp` says what Souther is, and needs no source
+file. `souther lsp` says what one source means, and answers nothing without one. An agent that
+speaks both protocols takes both.
+
+The [Claude Code plugin](https://github.com/souther-lang/souther-claude-plugin) registers both
+servers as subcommands of the `souther` binary and adds a short skill that makes the agent edit
+`.sou` files through the language server rather than through text search.
+
+```text
+/plugin marketplace add souther-lang/souther-claude-plugin
+/plugin install souther@souther-claude-plugin
+```
+
+<Aside type="note">
+`souther lsp` and `souther mcp` are not held to a `.souther-version` file. An editor or an agent
+starts them, and a refusal at start-up would show its reader nothing.
+</Aside>
+
+## Next steps
+
+- [Command line](/cli/) lists every command the servers wrap, with the options of `doc`, `api` and `japi`.
+- [Build plugins](/build/) compile the files the editor checks.
