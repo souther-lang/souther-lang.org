@@ -1,6 +1,8 @@
 ---
 title: Tutorial
 description: A hands-on introduction to Souther through an executable business-trip approval model.
+sidebar:
+  order: 3
 ---
 
 In this tutorial, you will build a domain model for a business trip expense application using Souther. You begin by modeling record fields and the core operations: submission, approval, and settlement. By the end, your types and behaviors will express which operations are valid in each state, why approval is required, what is reimbursed, and how invalid domain requests are rejected.
@@ -9,7 +11,7 @@ You do not build the entire model at once. First, you represent the current fiel
 
 In this tutorial, we call this approach Example-Driven Domain Modeling. Like BDD, it validates business logic through concrete scenarios, but its goal extends beyond agreeing on UI behavior. Through test cases, you discover and verify the types, states, and operations of the domain model itself.
 
-This tutorial covers the happy path from submission to final approval. Rejections and send-backs are omitted here. Once you complete the tutorial, you can compare your model with the full version in `businesstrip/src/main/souther/businesstrip.sou`.
+This tutorial covers the happy path from submission to final approval. Rejections and send-backs are omitted here. Once you complete the tutorial, you can compare your model with the full version in [`businesstrip/src/main/souther/businesstrip.sou`](https://github.com/souther-lang/examples/tree/main/businesstrip) in the examples repository.
 
 ## Before You Begin
 
@@ -53,45 +55,11 @@ The name `submitTrip` at the start of `example` is the target behavior. The inpu
 
 ## Prerequisites
 
-Souther requires JDK 25 or later. The compiler and the code it generates are pinned to the Java 25 class-file version, so an earlier JDK cannot run them. Check what you have:
+This tutorial needs Souther 0.4.0 and JDK 25. The install steps are on the [installation page](/install/). You do not need to create a Maven module. Check that the command is on your PATH:
 
 ```bash
-java -version
+souther version
 ```
-
-On WSL2, install the JDK inside WSL and confirm that `java -version` answers there, not only in Windows.
-
-The only other tool this tutorial needs is the `souther` command. You do not need to create a Maven module.
-
-On macOS, install using the Souther Homebrew tap:
-
-```bash
-brew install souther-lang/souther/souther
-```
-
-Verify the installation:
-
-```bash
-souther
-```
-
-If you do not use Homebrew, download the `souther` executable from [GitHub Releases](https://github.com/souther-lang/souther/releases). It is self-contained and needs nothing but the JDK on your PATH. Take the newest release listed there; the commands below use `v0.3.0`:
-
-```bash
-mkdir -p ~/.local/bin
-curl -L -o ~/.local/bin/souther \
-  https://github.com/souther-lang/souther/releases/download/v0.3.0/souther
-chmod +x ~/.local/bin/souther
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Each release also publishes `SHA256SUMS`, so you can check the download before running it. Add the `export` line to `~/.zshrc` or `~/.bashrc`. Open a new shell and verify:
-
-```bash
-souther
-```
-
-For VS Code, install the [Souther extension](https://marketplace.visualstudio.com/items?itemName=souther.souther) from the Visual Studio Marketplace, or run `ext install souther.souther` from the command palette. It gives syntax highlighting, diagnostics, completion, go-to-definition, rename, and formatting. The extension bundles its own language server and downloads a Java 25 runtime when the machine has none, so it works whether or not the `souther` command is installed.
 
 Create a working directory and place a single `businesstrip.sou` file inside. Run all commands from this directory:
 
@@ -172,6 +140,7 @@ example.businesstrip                                     measurement: complete
       · divided no way: submittedAt
     border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
+    replacement not applicable (this behavior has no body)
 
 4 behaviors: 0 implemented, 0 unimplemented, 4 injected; 0 rows waiting for a `let`.
 adequacy: undetermined
@@ -179,18 +148,18 @@ adequacy: undetermined
     may change in a wider run     0
     unaffected by a wider run    24
       app.actualExpense of submitTrip — no row names this behavior
+      app.finalApprovedAt of submitTrip — no row names this behavior
+      app.preApprovedAt of submitTrip — no row names this behavior
+      app.settlementAmount of submitTrip — no row names this behavior
       app.status of submitTrip — no row names this behavior
       app.submittedAt of submitTrip — no row names this behavior
-      app.preApprovedAt of submitTrip — no row names this behavior
-      app.finalApprovedAt of submitTrip — no row names this behavior
-      app.settlementAmount of submitTrip — no row names this behavior
 ```
 
-The other three behaviors add six lines each to that list, for the same reason.
+The other three behaviors add six lines each to that list, for the same reason. The list is sorted by behavior name, so the `submitTrip` lines come last.
 
 In the initial report, `submitTrip` shows `signature not applicable`. This indicates that the output type, `TripApplication`, is a single record type, so the report cannot determine whether test cases cover distinct output states. You can write expected values for the full record, but to distinguish `Submitted` and `PendingPreApproval` as output variants, states must be modeled as separate types.
 
-`branch not applicable (this behavior has no body)` appears because no `let` implementation exists yet. Once state types are separated and implementation is added, the report can evaluate code branches.
+`branch not applicable (this behavior has no body)` appears because no `let` implementation exists yet. Once state types are separated and implementation is added, the report can evaluate code branches. `replacement` is measured on a body as well: it asks whether the test cases would notice the body being rewritten, so it is `not applicable` for the same reason.
 
 `adequacy: undetermined` is not a verdict on the model. Adequacy is left open here because no test case names any of these behaviors, and the report says so under `what keeps it open`: each line is a position it could not answer for and why. `unaffected by a wider run` means running more of what is written would not settle these — what they wait on is a test case, not a longer search.
 
@@ -290,6 +259,7 @@ example submitTrip
       · divided no way: submittedAt
     border      not applicable (the rules of this behavior draw no line)
     branch      not applicable (this behavior has no body)
+    replacement not applicable (this behavior has no body)
 
 1 behavior: 0 implemented, 0 unimplemented, 1 injected; 2 rows waiting for a `let`.
 adequacy: satisfied
@@ -328,6 +298,7 @@ let submitTrip (app, submittedAt) =
           · read as submitTrip/app.estimatedExpense: = 100000
     branch      2/2
     decision    rules 2   taken 2
+    replacement 2/2
 
 1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: not satisfied
@@ -337,6 +308,8 @@ adequacy: not satisfied
 Now the report metrics show numbers. `observed 2/2 verified 2/2` indicates both test cases passed. `border obligations 2/4` names the two points no test case stands at: 100001, the first value the condition sends to pre-approval, and 100000, the last one below it. Each names where the line was drawn, `comparison@32:35` — the comparison itself, not the `if` it was written in — and the line under it reads the point back as a value of a position, `submitTrip/app.estimatedExpense`. Both are marked `!`, which is what `--strict` refuses over and what the count on the last line is of.
 
 `decision rules 2   taken 2` is about the body rather than the inputs: the `if` states two rules, and a test case goes through each.
+
+`replacement 2/2` asks a different question of the same body. The report rewrites each arm of the `if` to answer as the other arm and runs the test cases again. A rewrite is noticed when some test case comes out differently under it. Here both rewrites are noticed: a test case that expects `Submitted` fails when that arm answers `PendingPreApproval`, and the other way round. A rewrite no test case notices is a gap, because nothing written tells the model from a model that answers otherwise.
 
 Whether 100000 belongs to pre-approval or direct submission must be confirmed against the business rules.
 
@@ -414,6 +387,7 @@ each case and fill in the expected output from the business rules:
     border      borders 1   obligations 4/4
     branch      2/2
     decision    rules 2   taken 2
+    replacement 2/2
 
 1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: satisfied
@@ -705,32 +679,35 @@ souther examples businesstrip.sou --behavior finalApprove
 ```
   finalApprove             implemented   rows 2    pending 0
     signature   out specified 2/2  observed 2/2  verified 2/2
-    partition   axes 6   equivalence partitions 6/20
-      ! no row is in `Manager` at app.applicant.role
+    partition   axes 6   equivalence partitions 8/20
+      ! no row is in `GeneralEmployee` at app.applicant.role
       ! no row is in `PreApprovedRecord` at app.preApproval
-      · app.applicant.role holds 2 classes and this behavior's rules compose 0 of them
-      · no line: comparison@195:22 — it relates two positions rather than dividing one, about `approverID`
-    combination pairs 15 covered, 149 unknown; no row is owed at one
-      · app.applicant.role × app.preApproval: 1 covered, 3 unknown
+      · app.applicant.role holds 2 classes and this behavior does not tell them apart
+      · no line: comparison@220:22 — it relates the value here to another value rather than dividing the values here, about `app.applicant.managerID`
+      · no line: comparison@220:22 — it relates the value here to another value rather than dividing the values here, about `approverID`
     border      borders 24   obligations 0/0
-    branch      4/7
-      ! no row goes through `case AdvancePayment` (139:13)
+    branch      5/7
+      ! no row goes through `case AdvancePayment` (164:13)
     decision    rules 2   taken 2
-  declarations   obligations 6/20
+    replacement 2/5
+      ! no row would come out differently if an arm answered as its sibling
+  declarations   obligations 10/20
   Amount
       ! no row is at the ON point value = 0 (invariant Amount #1)
 ```
 
-The rest of the positions, pairs, border points and branch cases the report names one by one are left
-out above. The counts depend on the types you defined in Section 8, so yours will differ.
+The rest of the positions, border points, branch cases and rewrites the report names one by one are left
+out above. The counts depend on the types and fixtures you defined in Section 8, so yours will differ.
 
 `no row is in PreApprovedRecord` highlights that no test case evaluates final approval for an application that went through pre-approval. Adding that scenario covers the missing path.
 
-`no line: comparison@195:22 — it relates two positions rather than dividing one` is the report
+`no line: comparison@220:22 — it relates the value here to another value rather than dividing the values here` is the report
 declining to invent a class boundary: `approverID == app.applicant.managerID` compares two inputs, so
-neither side has a value the other can be measured against. `border obligations 0/0` says the same of
+neither side has a value the other can be measured against, and the report says so once for each side. `border obligations 0/0` says the same of
 this behavior's own lines, while the invariants of the types it reaches are counted under
 `declarations`, where a rule about a value is owed a row wherever that value is constructed.
+
+`replacement 2/5` counts the rewrites the test cases notice. The two rewrites of the `guard` are noticed, since a row expects `Approved` and another expects `UnauthorizedApproval`. The three that are not are arms of `calculateReimbursement`, which `finalApprove` calls to compute the settlement amount: the row expects `Approved` by name and states no settlement amount, so an arm answering `0` instead of the item's amount changes nothing any row looks at. Writing the whole expected `Approved` value, settlement amount included, closes these gaps.
 
 Treat these gaps as questions about the model, not merely a coverage target. A missing partition can reveal a business case that has not been decided, and a missing border can reveal an ambiguous rule. The report helps turn those questions into the next conversation with a domain expert and the next executable example.
 
@@ -743,7 +720,7 @@ souther examples businesstrip.sou --strict
 
 ## Homework
 
-You now have the main pipeline from submission to final approval. In `businesstrip/src/main/souther/businesstrip.sou`, you can explore these additional domain rules:
+You now have the main pipeline from submission to final approval. In [`businesstrip/src/main/souther/businesstrip.sou`](https://github.com/souther-lang/examples/tree/main/businesstrip) in the examples repository, you can explore these additional domain rules:
 
 - Rejections (`rejectPreApproval` and `rejectFinalApproval`) handling empty rejection reasons via `RejectionReason` invariants and `MissingRejectionReason` output variants.
 - Remands (`sendBack`) converting rejected applications back into `Draft` while ensuring rejection reasons are cleared by type constraints.
