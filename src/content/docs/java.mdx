@@ -1,0 +1,458 @@
+---
+title: Java
+description: What souther compile generates for the JVM, and how Java code calls, decodes, implements and embeds it.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The JVM is Souther's default target. `souther compile` writes Java 25 class files, and this page
+shows what those classes look like from Java. Souther owns the rules. Java owns the database, the
+HTTP layer, the clock and every other piece of infrastructure.
+
+The examples below come from one small model. Save it as `account.sou` and compile it with
+`souther compile -d classes account.sou` if you want to follow along.
+
+```sou
+module example.account exposing
+    ( AccountNo, Amount, Balance, WithdrawRequest
+    , Withdrawn, InsufficientFunds, NoAccount, CorruptStoredData
+    , AccountStatus, Active, Frozen
+    , withdraw, settle, currentBalance
+    )
+
+data AccountNo = String
+    invariant String.length(value) > 0
+
+data Amount = Int
+    invariant value >= 0
+
+data Balance = Int
+    invariant value >= 0
+
+data WithdrawRequest =
+    { account: AccountNo
+    , amount: Amount
+    }
+
+data Active
+data Frozen
+data AccountStatus = Active | Frozen
+
+data Withdrawn =
+    { account: AccountNo
+    , newBalance: Balance
+    }
+data InsufficientFunds = { shortfall: Int }
+data NoAccount
+
+// kept inside the module: not in exposing
+data AuditLine = { account: AccountNo, note: String }
+
+behavior withdraw : (request: WithdrawRequest, current: Balance)
+    -> Withdrawn | InsufficientFunds
+    constructs Withdrawn, InsufficientFunds, Balance
+
+let withdraw (request, current) = {
+    guard current.value >= request.amount.value
+        else InsufficientFunds { shortfall = request.amount.value - current.value }
+    Withdrawn { account = request.account
+              , newBalance = Balance(current.value - request.amount.value) }
+}
+
+// injected: Java supplies the implementation
+behavior currentBalance : (account: AccountNo)
+    -> Balance | NoAccount | CorruptStoredData
+
+behavior settle : (request: WithdrawRequest)
+    -> Withdrawn | InsufficientFunds | NoAccount | CorruptStoredData
+    depends on currentBalance
+    constructs Withdrawn, InsufficientFunds, Balance
+
+let settle (request, currentBalance) =
+    match currentBalance(request.account) with
+        | NoAccount -> NoAccount
+        | CorruptStoredData -> CorruptStoredData
+        | Balance as current -> {
+            guard current.value >= request.amount.value
+                else InsufficientFunds
+                    { shortfall = request.amount.value - current.value }
+            Withdrawn { account = request.account
+                      , newBalance = Balance(current.value - request.amount.value) }
+          }
+```
+
+A Java project needs the generated classes and `souther-runtime` on its class path. The runtime
+is `org.souther-lang:souther-runtime:0.4.0` on Maven Central. It declares its own dependency on
+Raoh, the decoder library the generated codecs are built from. The [build plugins](/build/) add
+both for you.
+
+## What is generated
+
+A module becomes a package of the same name. Every `data` becomes a class in that package, and the
+module header's `exposing` list decides which of them are public. The output below is `javap -p`
+on the classes of the model above, trimmed to the members that matter from Java.
+
+A product data is a Java record. Each field is a component with a public accessor. The canonical
+constructor is package-private, so Java code can read a value but cannot build one with `new`.
+`__construct` is the checked entry the compiler uses. The four static methods at the end are the
+derived codecs.
+
+```text
+public final class example.account.WithdrawRequest extends java.lang.Record {
+  example.account.WithdrawRequest(AccountNo, Amount);            // package-private
+  public final AccountNo account();
+  public final Amount amount();
+  public static Result<WithdrawRequest, InvariantFailure> __construct(AccountNo, Amount);
+  public static Decoder<Map<String, Object>, WithdrawRequest> decoder();
+  public static Decoder<JsonNode, WithdrawRequest> jsonDecoder();
+  public static Decoder<Record, WithdrawRequest> recordDecoder();
+  public static Encoder<WithdrawRequest, Map<String, Object>> encoder();
+}
+```
+
+A newtype is a record with one component named `value`. `Int` is carried as `long`. A newtype over
+an ordered type implements `Comparable`, so it works as a `TreeMap` key. Its encoder writes a bare
+scalar, not a map.
+
+```text
+public final class example.account.Amount extends java.lang.Record
+    implements java.lang.Comparable<Amount> {
+  example.account.Amount(long);                                   // package-private
+  public final long value();
+  public final int compareTo(Amount);
+  public static Result<Amount, InvariantFailure> __construct(long);
+  public static Decoder<Object, Amount> decoder();
+  public static Decoder<JsonNode, Amount> jsonDecoder();
+  public static Encoder<Amount, Long> encoder();
+}
+```
+
+A sum is a sealed interface. `javap -p` does not print the `sealed` keyword, but the class file
+carries a `PermittedSubclasses` attribute that lists the cases. Each case is a record that
+implements the interface. A unit data such as `Active` is a record with no components and a shared
+`INSTANCE`. A sum whose cases are all units is an enumeration and encodes to the case name.
+
+```text
+public interface example.account.AccountStatus {
+  public static Decoder<Object, AccountStatus> decoder();
+  public static Decoder<JsonNode, AccountStatus> jsonDecoder();
+  public static Encoder<AccountStatus, String> encoder();
+}
+PermittedSubclasses:
+  example/account/Active
+  example/account/Frozen
+
+public final class example.account.Active extends java.lang.Record
+    implements example.account.AccountStatus {
+  public static final Active INSTANCE;
+  example.account.Active();                                       // package-private
+  public static Decoder<Object, Active> decoder();
+  public static Encoder<Active, Map<String, Object>> encoder();
+}
+```
+
+A data that is not in `exposing` is still generated, but its class is package-private and so is
+its `__construct`. Nothing outside the package can name it. `AuditLine` is the one data the model
+keeps to itself.
+
+```text
+final class example.account.AuditLine extends java.lang.Record {
+  example.account.AuditLine(AccountNo, String);
+  static Result<AuditLine, InvariantFailure> __construct(AccountNo, String);
+  public final AccountNo account();
+  public final String note();
+}
+```
+
+A behavior with a `let` becomes a public interface named after the behavior with its first letter
+capitalized. Its implementation lives in a `<Name>$Impl` class that Java never names. A behavior
+output written as a union, such as `Withdrawn | InsufficientFunds`, becomes a sealed interface
+named `<Name>Result`, and each case record implements it. One record can implement several result
+interfaces. `NoAccount` below belongs to both `CurrentBalanceResult` and `SettleResult`.
+
+```text
+public interface example.account.Withdraw {
+  public abstract WithdrawResult apply(WithdrawRequest, Balance);
+  public static Withdraw of();
+}
+
+public interface example.account.WithdrawResult {
+  public static Encoder<WithdrawResult, Map<String, Object>> encoder();
+}
+PermittedSubclasses:
+  example/account/InsufficientFunds
+  example/account/Withdrawn
+
+public final class example.account.NoAccount extends java.lang.Record
+    implements example.account.CurrentBalanceResult, example.account.SettleResult {
+  public static final NoAccount INSTANCE;
+}
+```
+
+Every generated class is annotated with JSpecify's `@NullMarked`. No accessor, factory, codec or
+`apply` returns null. Absence is `souther.runtime.Option`, and a failure is a case of the output.
+Each class also carries `SourceFile` and `LineNumberTable` attributes, so a stack trace points at
+the `.sou` line. The class-file version is pinned to Java 25, major version 69, whatever JDK ran
+the compiler.
+
+## Calling a behavior from Java
+
+A behavior whose requirement set is empty has a static `of()` factory. A behavior with one input
+extends `souther.runtime.Behavior<In, Out>` and inherits `apply(In)`. A behavior with two or more
+inputs declares `apply(A, B, ...)` directly, one argument per input. `withdraw` takes two inputs,
+so Java calls `apply(request, current)` and switches over the sealed `WithdrawResult`.
+
+```java
+import example.account.Balance;
+import example.account.InsufficientFunds;
+import example.account.Withdraw;
+import example.account.WithdrawRequest;
+import example.account.Withdrawn;
+
+import java.util.Map;
+
+WithdrawRequest request = WithdrawRequest.decoder()
+        .decode(Map.of("account", "A-1", "amount", 300)).getOrThrow();
+Balance current = Balance.decoder().decode(100).getOrThrow();
+
+Withdraw withdraw = Withdraw.of();
+String line = switch (withdraw.apply(request, current)) {
+    case Withdrawn w -> "withdrawn, new balance " + w.newBalance().value();
+    case InsufficientFunds f -> "short by " + f.shortfall();
+};
+System.out.println(line);
+```
+
+```text
+short by 200
+```
+
+The `switch` has no `default` arm. `WithdrawResult` permits exactly two classes, so `javac` checks
+that both are handled. Add a third case to the behavior's output and this `switch` stops compiling.
+
+## Decoding input and encoding output
+
+Every exposed data carries static codec factories. The decoders return Raoh's
+`net.unit8.raoh.decode.Decoder<I, T>`, and the encoder returns
+`net.unit8.raoh.encode.Encoder<T, O>`.
+
+| Method | Input | Generated for |
+| --- | --- | --- |
+| `decoder()` | `Map<String, Object>` for a product, `Object` for a newtype or sum | every data |
+| `jsonDecoder()` | `tools.jackson.databind.JsonNode` | every data |
+| `recordDecoder()` | `org.jooq.Record` | a flat product or a unit |
+| `encoder()` | the value | every data |
+
+`decode(input)` returns `net.unit8.raoh.Result<T>`, a sealed interface with two records. `Ok`
+carries the value. `Err` carries `Issues`, a list of `Issue` records. Each issue has a `path`, a
+`code`, a `message` and a `meta` map. The path is a JSON Pointer such as `/amount`. The decoder
+accumulates issues from independent fields instead of stopping at the first one.
+
+```java
+import example.account.WithdrawRequest;
+
+import net.unit8.raoh.Err;
+import net.unit8.raoh.Issue;
+import net.unit8.raoh.Ok;
+
+import java.util.Map;
+
+Map<String, Object> raw = Map.of("account", "", "amount", -5);
+
+switch (WithdrawRequest.decoder().decode(raw)) {
+    case Ok<WithdrawRequest>(var request) ->
+        System.out.println(WithdrawRequest.encoder().encode(request));
+    case Err<WithdrawRequest>(var issues) -> {
+        for (Issue issue : issues.asList()) {
+            System.out.println(issue.path().toJsonPointer()
+                    + " " + issue.code() + " " + issue.message() + " " + issue.meta());
+        }
+    }
+}
+```
+
+```text
+/account too_short must be at least 1 characters {actual=0, min=1}
+/amount out_of_range must be non-negative {actual=-5, min=0}
+```
+
+The invariants ran during decode. `AccountNo` requires a non-empty string and `Amount` requires a
+non-negative number, and both rejections arrive as issues at the field's path. An invariant that
+matches a Raoh constraint reports that constraint's code, such as `too_short`, `out_of_range`,
+`invalid_format` or `too_small`. Any other invariant reports `invariant_violation` with the module,
+type and clause name in `meta`. A value that reaches `Ok` has passed every invariant on the way in.
+
+Encoding never fails. A product encodes to a `Map<String, Object>`, which Jackson or any other
+JSON library writes as an object. A newtype encodes to its scalar. A result union encodes its
+member with a `type` discriminator, so a boundary can serialize whichever case came back.
+
+```java
+System.out.println(WithdrawRequest.encoder().encode(request));
+System.out.println(Amount.encoder().encode(request.amount()));
+System.out.println(AccountStatus.encoder().encode(Active.INSTANCE));
+```
+
+```text
+{account=A-1, amount=300}
+300
+Active
+```
+
+<Aside type="note">
+`decoder()` reads an integer from any exact integer representation, so `Map.of("amount", 300)`
+with an `Integer` decodes. A `Double` is refused with `type_mismatch`, because a binary fraction is
+not the number that was written.
+</Aside>
+
+## Implementing an injected behavior
+
+A behavior without a `let` is an abstract class, not an interface. Java extends it and overrides
+`apply`. The class is public even when the behavior is not exposed, because an injected behavior
+is by definition implemented outside the module. For each unit case of the output and each data
+named in `constructs`, the base class carries a `protected` factory. Those factories are the only
+way Java gets a failure case, since the records' constructors stay package-private.
+
+```text
+public abstract class example.account.CurrentBalance
+    implements souther.runtime.Behavior<AccountNo, CurrentBalanceResult> {
+  protected example.account.CurrentBalance();
+  protected final NoAccount NoAccount();
+  protected final CorruptStoredData CorruptStoredData();
+}
+```
+
+The implementation below keeps balances in a map. A real one queries a database, as
+[`JooqFindMember.java`](https://github.com/souther-lang/examples/blob/main/member/src/main/java/app/member/JooqFindMember.java)
+in the examples repository does with jOOQ. The shape is the same. Encode the input to reach the
+raw value, build the success value through the decoder, and return a failure case through an
+inherited factory.
+
+```java
+package app;
+
+import example.account.AccountNo;
+import example.account.Balance;
+import example.account.CurrentBalance;
+import example.account.CurrentBalanceResult;
+
+import net.unit8.raoh.Err;
+import net.unit8.raoh.Ok;
+
+import java.util.Map;
+
+public final class MapCurrentBalance extends CurrentBalance {
+    private final Map<String, Long> stored;
+
+    public MapCurrentBalance(Map<String, Long> stored) {
+        this.stored = stored;
+    }
+
+    @Override
+    public CurrentBalanceResult apply(AccountNo account) {
+        Long row = stored.get(AccountNo.encoder().encode(account));
+        if (row == null) {
+            return NoAccount();                        // inherited protected factory
+        }
+        return switch (Balance.decoder().decode(row)) {
+            case Ok<Balance>(var balance) -> balance;
+            case Err<Balance> _ -> CorruptStoredData(); // inherited protected factory
+        };
+    }
+}
+```
+
+A composed behavior that depends on injected ones has a static `bind(...)` factory instead of
+`of()`. It takes one implementation per dependency named in `depends on`. `settle` depends on
+`currentBalance`, so `Settle.bind` takes one `CurrentBalance`.
+
+```java
+Settle settle = Settle.bind(new MapCurrentBalance(Map.of("A-1", 100L, "A-2", -7L)));
+
+WithdrawRequest request = WithdrawRequest.decoder()
+        .decode(Map.of("account", "A-1", "amount", 30)).getOrThrow();
+
+String line = switch (settle.apply(request)) {
+    case Withdrawn w -> "200 " + SettleResult.encoder().encode(w);
+    case InsufficientFunds f -> "409 short by " + f.shortfall();
+    case NoAccount _ -> "404";
+    case CorruptStoredData _ -> "500";
+};
+```
+
+Run for the accounts `A-1`, `A-2` and `A-3`, the switch prints one line each. The stored balance
+of `A-2` is negative, so `Balance.decoder()` rejects it and the implementation returns
+`CorruptStoredData`.
+
+```text
+A-1 -> 200 {account=A-1, newBalance=70, type=Withdrawn}
+A-2 -> 500
+A-3 -> 404
+```
+
+In a Spring application the bound behavior is a bean. The `member` example wires it in
+[`SoutherBeans.java`](https://github.com/souther-lang/examples/blob/main/member/src/main/java/app/member/web/SoutherBeans.java)
+in two lines, and the controller injects the interface type.
+
+```java
+@Bean
+public 会員を照会し整形する 会員照会パイプライン(DSLContext dsl) {
+    return 会員を照会し整形する.bind(new JooqFindMember(dsl));
+}
+```
+
+A Java implementation does not catch infrastructure exceptions. A database outage is not a case
+of the output, so the implementation lets the exception propagate, and `apply` passes it through
+to the caller. The `member` example maps Spring's `DataAccessException` to HTTP 503 in an
+`@ExceptionHandler`.
+
+## Failures stay in four categories
+
+A business outcome is a case of the behavior's output, such as `InsufficientFunds` or `NoAccount`.
+It is ordinary data with no marker that calls it an error. Java receives it through the sealed
+result type and decides what it means for the caller, often an HTTP 4xx.
+
+Invalid input is a decoder's `Err`. The value came from outside, so rejecting it is expected, and
+the issues say which field failed and why. It never becomes a domain value and never throws.
+
+An invariant abort is `souther.runtime.ConstraintViolation`. It is thrown when a computation
+inside the domain builds a value that breaks its invariant, which means the model has a bug.
+Souther cannot catch it. The boundary can, and should treat it as a 500, not as a business
+decision.
+
+A platform exception is whatever the Java implementation of an injected behavior throws when the
+database, the network or the clock fails. Souther passes it through unchanged. The boundary handles
+it as an infrastructure failure, with a retry, a rollback or a 503.
+
+## Embedding the compiler
+
+`souther.compiler.Compiler` is the one class a program outside the compiler is meant to name.
+`Compiler.compile(source)` compiles one module from a string and returns a
+`Map<String, ClassFileImage>` keyed by binary class name, where `bytes()` gives the class file.
+`Compiler.compileModules(List.of(sourceA, sourceB))` compiles several modules that import each
+other and returns them together. The compiler is `org.souther-lang:souther-compiler:0.4.0`, and
+the [build plugins](/build/) call it the same way.
+
+```java
+Map<String, ClassFileImage> classes = Compiler.compile(source);
+for (var entry : classes.entrySet()) {
+    Path file = dir.resolve(entry.getKey().replace('.', '/') + ".class");
+    Files.createDirectories(file.getParent());
+    Files.write(file, entry.getValue().bytes());
+}
+```
+
+## Memory layout
+
+A Souther model is many small immutable objects, a newtype per identifier and amount and a record
+per state, which is the shape JEP 519's `-XX:+UseCompactObjectHeaders` is designed for. The flag is
+available on JDK 25 without a rebuild, and the compiler's test suite and every example pass under
+it, so measure your own model with it turned on.
+
+## Next steps
+
+- [Build plugins](/build/) compile `.sou` files inside Maven or Gradle before `javac` runs.
+- The [examples repository](https://github.com/souther-lang/examples) has full Spring Boot, jOOQ,
+  Kotlin and Clojure boundaries around generated code.
+- [WebAssembly](/wasm/) and [Native](/native/) compile the same checked program for hosts without a JVM.
