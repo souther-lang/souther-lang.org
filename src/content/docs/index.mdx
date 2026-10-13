@@ -4,15 +4,12 @@ description: Make business rules executable.
 template: splash
 hero:
   tagline: |
-    <p class="motto">A small JVM language for <strong>business rules that stay true</strong>.</p>
-    <p>Business software changes constantly. The rules that define it should not be scattered
-    across comments, constructors, exception handling and service calls. Souther turns the
-    <code>data</code> and <code>behavior</code> of a specification into executable domain types,
-    while making the constraints, construction paths, and external dependencies that specifications
-    often leave in comments explicit and checked.</p>
-    <p>The examples that describe a rule are part of the language. They run on every compile, and
-    <code>souther examples</code> reports which boundary, which input class and which outcome no
-    example has reached yet. The model grows by answering those reports.</p>
+    <p class="motto">Souther asks you only <strong>what only you can answer</strong>.</p>
+    <p>Business software is mostly code that follows from a few decisions: what a value may be,
+    which state follows which, what each case returns. Souther makes each of those decisions one
+    line, an <code>invariant</code>, a <code>constructs</code> clause, an <code>example</code> row,
+    and checks them on every compile. What follows from them is derived or delegated. What is still
+    undecided, the report hands back to you as a question.</p>
   actions:
     - text: Get started
       link: /install/
@@ -60,7 +57,7 @@ heroCode: |
 
 import FeatureRow from '../../components/FeatureRow.astro';
 
-## Model the rule, not its accidental implementation
+## Each decision is one line the compiler checks
 
 <FeatureRow title="Invalid values have nowhere to hide">
 <Fragment slot="prose">
