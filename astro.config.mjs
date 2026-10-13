@@ -78,6 +78,14 @@ export default defineConfig({
 			customCss: ['./src/styles/custom.css'],
 			expressiveCode: {
 				shiki: { langs: [southerGrammar] },
+				// Compiler output and shell commands wrap rather than scroll: a diagnostic or a
+				// report line cut at the column edge loses the part that says what went wrong.
+				// Source code keeps its layout and scrolls, because its line breaks mean something.
+				defaultProps: {
+					overridesByLang: {
+						'text,txt,sh,bash,shell,powershell,json': { wrap: true, preserveIndent: true },
+					},
+				},
 			},
 			components: {
 				// Puts a Souther sample beside the hero copy when a page sets `heroCode`.
