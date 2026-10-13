@@ -1,0 +1,567 @@
+---
+title: Language tour
+description: Every construct of Souther on one page, from a source file to the module boundary, with snippets that compile as written.
+sidebar:
+  order: 1
+---
+
+This tour walks through the whole of Souther on one page, from a source file to the module
+boundary. Every snippet compiles with the 0.4.0 compiler as written, and every output shown is what
+the command printed.
+
+## A source file
+
+```sou
+module shop.cart exposing ( Cart, LineItem, lineTotal )
+
+import List ( sum )
+
+// A comment runs from `//` to the end of the line.
+data LineItem = { sku: String, quantity: Int, unitPrice: Int }
+data Cart = { items: List<LineItem> }
+
+behavior lineTotal : (cart: Cart) -> Int
+let lineTotal (cart) =
+    sum(List.map(line -> line.quantity * line.unitPrice, cart.items))
+```
+
+A `.sou` file is one module. The `module` line names it, and `exposing` lists the declarations
+other modules may reach. A file compiled on its own may leave the header out, and the module is
+then named after the file. A module that another file imports must write the header.
+
+A comment starts at `//` and ends with the line. There is no block comment.
+
+Standard library functions are always reachable through their qualifier, such as `List.map`. An
+`import` line lets you write a name without the qualifier, and nothing else. An imported name you
+never use is a compile error, E1922.
+
+## Built-in types
+
+| Type | Holds | Written as |
+| --- | --- | --- |
+| `Int` | a signed 64-bit integer | `500` |
+| `Decimal` | an exact decimal number | `1.5m` |
+| `Bool` | `true` or `false` | `true` |
+| `String` | Unicode text | `"apple"` |
+| `Date` | a calendar date | `Date("2026-10-13")` |
+| `Time` | a time of day, to the second | `Time("09:00")` |
+| `DateTime` | a date and a time, no zone | `DateTime("2026-10-13T09:00")` |
+| `Instant` | a moment on the timeline, in UTC | `Instant("2026-10-13T00:00:00Z")` |
+| `List<T>` | an ordered sequence | `["fruit", "fresh"]` |
+| `Map<K, V>` | keys to values | `Map.fromList([("apple", 12)])` |
+| `Set<T>` | distinct values | `Set.fromList(["a", "b"])` |
+| `T?` | a `T` or nothing | a value, or `None` |
+
+```sou
+data Reading =
+    { count: Int
+    , price: Decimal
+    , active: Bool
+    , label: String
+    , day: Date
+    , at: DateTime
+    , tags: List<String>
+    , stock: Map<String, Int>
+    , seen: Set<String>
+    , note: String?
+    }
+
+let sample = Reading
+    { count = 3
+    , price = 1.5m
+    , active = true
+    , label = "apple"
+    , day = Date("2026-10-13")
+    , at = DateTime("2026-10-13T09:00")
+    , tags = ["fruit", "fresh"]
+    , stock = Map.fromList([("apple", 12)])
+    , seen = Set.fromList(["a", "b", "a"])
+    , note = None
+    }
+```
+
+There is no floating-point type. A fraction is a `Decimal` and needs the `m` suffix, so `1.5` on
+its own is a compile error. A temporal value is written as its type applied to text, and the
+compiler reads the text where it stands. Only `List` has a literal. A `Set` or a `Map` is built
+from a list with `Set.fromList` or `Map.fromList`, and the three values in `seen` collapse to two.
+
+`String?` is the type `Option<String>`. To fill a `?` field, write the value itself or write `None`.
+There is no `Some` to write.
+
+## Product data
+
+```sou
+data EmployeeId = String
+data Amount = Int
+
+data TripRequestFields =
+    { requester: EmployeeId
+    , plannedCost: Amount
+    }
+
+data Draft = { ...TripRequestFields }
+
+data Submitted =
+    { ...TripRequestFields
+    , submittedAt: DateTime
+    }
+
+let costOf (d: Draft): Int = d.plannedCost.value
+
+let submitAt (d: Draft, at: DateTime): Submitted =
+    Submitted { ...d, submittedAt = at }
+```
+
+A `data` with braces is a product: a record of named, immutable fields. A field is read with a dot.
+A value is built with a record literal that names its type, `Submitted { ... }`, and every field
+must be given.
+
+The spread `...` appears in two places. In a declaration, `...TripRequestFields` copies that
+record's fields and its invariants into this one, laid out flat, so `s.requester` reads directly. A
+field name that collides is a compile error. In a literal, `...d` copies the same-named fields from
+the value `d`, and the rest are written out. The spread is not inheritance: `Draft` and
+`Submitted` are two unrelated types that share a definition of their common part.
+
+## Sum data and unit data
+
+```sou
+data EmployeeId = String
+data Draft = { requester: EmployeeId }
+data Submitted = { requester: EmployeeId, submittedAt: DateTime }
+data Rejected = { reason: String }
+
+data TripRequest = Draft | Submitted | Rejected | Withdrawn
+
+let describe (r: TripRequest): String =
+    match r with
+        | Draft           -> "still being written"
+        | Submitted as s  -> "submitted by " ++ s.requester.value
+        | Rejected { reason } -> "rejected: " ++ reason
+        | Withdrawn       -> "withdrawn"
+```
+
+A `data` with `|` is a sum: a value is exactly one of the listed cases. Each case is a declared
+`data`. A case that nothing declares, such as `Withdrawn`, is a unit: a type with one value and no
+fields. This is how a lifecycle is written. A `Draft` and a `Submitted` are different types, so a
+behavior that takes a `Submitted` cannot be handed a `Draft`.
+
+A case value can stand wherever its sum is expected. Going the other way needs `match`. An arm
+binds the whole value with `as`, or opens its fields with `{ reason }`. A unit case is written by
+its name alone, both as a value and in an arm.
+
+## Newtypes
+
+```sou
+data EmailAddress = String
+data Activated = EmailAddress
+data Unactivated = EmailAddress
+data Email = Activated | Unactivated
+
+let domainOf (e: EmailAddress): String =
+    e.value |> String.split("@") |> List.get(1) |> Option.withDefault("")
+
+let addressOf (m: Email): String =
+    match m with
+        | Activated(EmailAddress(s))   -> s
+        | Unactivated(EmailAddress(s)) -> s
+```
+
+`data X = Y` with a single type on the right is a newtype. `X` is a distinct type that wraps one
+`Y`. It is built by applying the name, `EmailAddress("a@b.example")`, and the inside is read as
+`.value`. At the boundary it is written as the bare `Y`, so an `EmailAddress` crosses as a string.
+
+A newtype may wrap another newtype. A pattern opens as many layers as it names:
+`Activated(EmailAddress(s))` binds `s` to the string underneath, so `.value.value` is never written.
+Two newtypes over the same base do not mix. `Activated` and `Unactivated` are both strings
+underneath, and a behavior that takes an `Activated` refuses an `Unactivated` at compile time.
+
+## Optional fields
+
+```sou
+data EmployeeId = String
+
+data Employee =
+    { id: EmployeeId
+    , manager: Employee?
+    }
+
+let approvalDepth (e: Employee): Int =
+    e.manager
+        |> Option.map(m -> approvalDepth(m) + 1)
+        |> Option.withDefault(0)
+
+let ceo = Employee { id = EmployeeId("e-1"), manager = None }
+let staff = Employee { id = EmployeeId("e-2"), manager = ceo }
+```
+
+Absence is a field marked with `?`, and nothing else. A value written into a `?` field is wrapped
+for you, as `manager = ceo` shows, and `None` is the empty value. An `Option` is opened with
+`match` on `Some v` and `None`, or with the `Option` functions. The compiler accepts the recursion
+in `approvalDepth` because each call moves to a strictly smaller part of its input.
+
+There is no `null`. Writing one is a compile error rather than a runtime surprise.
+
+```sou
+let ceo = Employee { id = EmployeeId("e-1"), manager = null }
+```
+
+```text
+-- USE OF NULL  E1301 -------------------------null.sou:8:56
+
+8| let ceo = Employee { id = EmployeeId("e-1"), manager = null }
+                                                          ^^^^
+
+`null` is not part of the language. Use an optional field with `?`.
+```
+
+## Invariants
+
+```sou
+data Amount = Int
+    invariant value >= 0
+
+data DateRange =
+    { start: Date
+    , end: Date
+    }
+    invariant ordered = start <= end
+
+data QuoteLines = List<String>
+    invariant nonEmpty = List.length(value) >= 1
+    invariant unique = List.length(List.distinct(value)) == List.length(value)
+
+let fee = Amount(500)
+```
+
+An `invariant` is a `Bool` expression written under a `data`. A newtype refers to what it wraps as
+`value`, and a product refers to its fields by name. A clause may carry a name, such as `ordered`,
+and a type may carry several clauses. The expression may use comparison, arithmetic, the standard
+library and your own pure helpers. It may not build a value, call a behavior, or reach anything
+that might not terminate.
+
+The check runs on every construction, including the fields a spread brought in and the
+constructor Java reaches through a decoder. No code path skips it. Where the violation happens
+decides what it means. At the boundary, a decoder reports the failed clause with the path to the
+field, and no value enters the domain. Inside a behavior, a violation is a model bug and the
+computation aborts. It never becomes a business outcome by accident. Where the compiler can see
+the violation, it refuses the build.
+
+```sou
+let fee = Amount(-5)
+```
+
+```text
+-- INVARIANT  E2010 ----------------------violation.sou:4:11
+
+4| let fee = Amount(-5)
+             ^
+
+`Amount(-5)` violates its invariant.
+```
+
+## Behaviors
+
+```sou
+data EmployeeId = String
+data Amount = Int
+    invariant value >= 0
+
+data Draft = { requester: EmployeeId, plannedCost: Amount }
+data Submitted = { requester: EmployeeId, plannedCost: Amount, submittedAt: DateTime }
+data Rejected = { reason: String }
+
+// Injected: no `let`, so Java supplies the implementation.
+behavior now : () -> DateTime
+
+behavior submit : (request: Draft) -> Submitted | Rejected
+    constructs Submitted, Rejected
+    depends on now
+
+let submit (request, now) = {
+    guard request.plannedCost <= 100000
+        else Rejected { reason = "high_cost" }
+    Submitted { ...request, submittedAt = now() }
+}
+```
+
+A `behavior` is a declaration: named inputs, and an output that is a sum of every outcome the
+behavior may return. `Rejected` is ordinary data in that sum, not an exception and not an error
+wrapper. The `let` of the same name is the implementation. Its parameters are the behavior's,
+followed by one parameter for each entry in `depends on`.
+
+A behavior with no `let` is injected. `now` has no implementation in Souther, and Java supplies one.
+This is the only way a behavior reaches a clock, a database or a network. A behavior that calls an
+injected one names it in `depends on`, and the compiler checks the clause in both directions.
+Naming a dependency you do not use is E1603, and using one you did not name is E1602.
+
+`constructs` lists the data a behavior creates, as opposed to values it passes through. For a
+behavior with a `let` the clause is optional, and when written it must match the body exactly.
+
+```text
+-- INSUFFICIENT CONSTRUCTION AUTHORITY  E1002 -constructs.sou:5:1
+
+5| behavior submit : (request: Draft, at: DateTime) -> Submitted | Rejected
+   ^
+
+Behavior `submit` constructs `Rejected` but does not declare `constructs Rejected`.
+Hint: Add `constructs Rejected` to `submit`, or stop constructing Rejected here.
+```
+
+## Expressions
+
+```sou
+data LineItem = { sku: String, quantity: Int, unitPrice: Int }
+data Cart = { items: List<LineItem> }
+data Priced = { total: Int, label: String }
+data EmptyCart
+
+behavior price : (cart: Cart) -> Priced | EmptyCart
+    constructs Priced
+
+let price (cart) = {
+    guard List.length(cart.items) >= 1 else EmptyCart
+    let total =
+        cart.items
+            |> List.map(line -> line.quantity * line.unitPrice)
+            |> List.sum
+    let label = if total >= 10000 then "large" else "regular"
+    Priced { total = total, label = label ++ " order" }
+}
+```
+
+A body is an expression. A block in braces holds `let` bindings and `guard` statements and ends
+with the value it returns. A `let` binds once and is never reassigned. An `if` always has an
+`else`, and both branches are values. `guard` states the condition for continuing and the value the
+behavior returns when the condition does not hold, so there is no early-return convention to learn.
+
+The pipe `|>` passes the value on its left as the last argument of the call on its right. Standard
+library functions take the collection or string last for this reason, so a chain reads top to
+bottom. A closure is written `line -> ...`. The `++` operator joins two strings or two lists.
+
+```sh
+souther run pricing.sou --behavior price \
+  --input '{"items":[{"sku":"apple","quantity":2,"unitPrice":150}]}'
+```
+
+```text
+{"total":300,"label":"regular order","type":"Priced"}
+```
+
+`match` is exhaustive. When a case is missing, the compiler names it.
+
+```sou
+let describe (r: TripRequest): String =
+    match r with
+        | Draft        -> "still being written"
+        | Submitted    -> "submitted"
+```
+
+```text
+-- NON-EXHAUSTIVE MATCH  E1201 --------nonexhaustive.sou:7:5
+
+7|     match r with
+       ^^^^^
+
+This `match` on data `TripRequest` does not cover every case.
+Hint: Add a case for: Rejected
+```
+
+## Composition with `>->`
+
+```sou
+module shop.members exposing ( MemberId, Member, Card, lookupAndFormat : Card | NoMember )
+
+data MemberId = String
+data Member = { id: MemberId, name: String }
+data Card = { line: String }
+
+// Injected: Java reads the member from a database.
+behavior findMember : (id: MemberId) -> Member | NoMember
+
+behavior formatMember : (m: Member) -> Card
+    constructs Card
+let formatMember (m) = Card { line = m.id.value ++ " " ++ m.name }
+
+behavior lookupAndFormat = findMember >-> formatMember
+```
+
+`>->` chains behaviors into a pipeline, and the pipeline is itself a behavior. Routing is decided by
+type. Of the cases the first stage returns, the next stage receives the ones its input accepts.
+Every other case leaves the pipeline at that point and becomes part of the pipeline's output. Here
+`formatMember` takes a `Member`, so `NoMember` skips it and `lookupAndFormat` returns
+`Card | NoMember`.
+
+```text
+f : A -> B | R     g : B -> C          f >-> g : A -> C | R
+f : A -> B | R     g : B -> C | S      f >-> g : A -> C | S | R
+f : A -> B1 | B2   g : B1 | B2 -> C    f >-> g : A -> C
+```
+
+No case is marked as a failure. Whether `NoMember` stops the pipeline depends on what the next
+stage accepts, so the same case can be an outcome in one composition and a departure in another.
+The compiler infers the output of the whole pipeline. A pipeline named in `exposing` must state
+that output there, so a change in a stage cannot change the module's contract silently.
+
+## Examples and fakes
+
+```sou
+data Sku = String
+data LineItem = { sku: Sku, quantity: Int }
+data Cart = { open: Bool, items: List<LineItem> }
+data PricedCart = { total: Int }
+data EmptyCart
+
+// Injected: Java looks the price up.
+behavior currentPrice : (sku: Sku) -> Int
+
+behavior quote : (cart: Cart) -> PricedCart | EmptyCart
+    constructs PricedCart
+    depends on currentPrice
+
+let quote (cart, currentPrice) = {
+    guard cart.open && List.length(cart.items) >= 1 else EmptyCart
+    PricedCart { total =
+        cart.items
+            |> List.map(line -> line.quantity * currentPrice(line.sku))
+            |> List.sum }
+}
+
+fake currentPrice
+    | (Sku("apple")) -> 150
+    | _              -> 100
+
+example quote
+    | "two apples -> a priced cart" :
+        (Cart { open = true, items = [ LineItem { sku = Sku("apple"), quantity = 2 } ] })
+        -> PricedCart { total = 300 }
+    | "a closed cart -> empty" :
+        (Cart { open = false, items = [ LineItem { sku = Sku("apple"), quantity = 2 } ] })
+        -> EmptyCart
+    | "an open cart with nothing in it -> empty" :
+        (Cart { open = true, items = [] })
+        -> EmptyCart
+```
+
+An `example` names a behavior and lists rows. Each row has a name, the inputs, and the expected
+result. The result may be a whole value, compared field by field, or a bare case name such as
+`EmptyCart`, which checks only which case came back. The rows run during compilation, so a row
+that no longer holds fails the build.
+
+```text
+-- EXAMPLE  E1905 ---------------------------wrong.sou:29:12
+
+29|         -> PricedCart { total = 299 }
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This example does not hold.
+
+It is:
+    PricedCart { total = 300 }
+But it needs to be:
+    PricedCart { total = 299 }
+Hint: two apples -> a priced cart
+```
+
+A `fake` stands in for an injected dependency while the rows run. It is a table from input to
+output, matched by value, with `_` as the default row. A fake is never compiled into the output.
+`souther examples` reads the same rows and reports what they leave untested: output cases no row
+expects, partitions of the input no row is in, and borders no row sits on.
+
+```sh
+souther examples quote.sou
+```
+
+```text
+quote                                                    measurement: complete
+  currentPrice             injected      rows 0    pending 0
+    signature   not applicable (this behavior's output is not a sum)
+    partition   not applicable (the rules of this behavior divide no position)
+      · divided no way: sku
+    border      not applicable (the rules of this behavior draw no line)
+    branch      not applicable (this behavior has no body)
+    replacement not applicable (this behavior has no body)
+  quote                    implemented   rows 3    pending 0
+    signature   out specified 2/2  observed 2/2  verified 2/2
+    partition   axes 2   equivalence partitions 4/4
+      · divided no way: cart.items[*].sku
+      · divided no way: cart.items[*].quantity
+    combination pairs 3 covered, 1 uncovered
+      ! no row is in `List.length(cart.items)/0 <= x <= 0` at quote/List.length(cart.items) with `false` at quote/cart.open
+    border      borders 1   obligations 2/3
+      ! no row is at an IN point (comparison@15:48)
+          · read as quote/List.length(cart.items): in 1 < List.length(cart.items)
+      · no OUT point is owed at List.length(cart.items) = 0 (comparison@15:48): excluded — the rules leave no value there
+    branch      2/2
+    decision    rules 2   taken 2
+    replacement 2/2
+
+2 behaviors: 1 implemented, 0 unimplemented, 1 injected; 0 rows waiting for a `let`.
+adequacy: not satisfied
+2 gaps marked `!`: what a strict build refuses over.
+```
+
+## Modules and the boundary
+
+```sou
+module shop.app
+
+import shop.members ( Member, formatMember )
+
+data Greeting = { text: String }
+
+behavior greet : (m: Member) -> Greeting
+    constructs Greeting
+let greet (m) = Greeting { text = "hello " ++ m.name }
+```
+
+```sh
+souther compile members.sou app.sou -d out
+```
+
+```text
+-- MODULE ERROR  E1507 --------------------------app.sou:3:1
+
+3| import shop.members ( Member, formatMember )
+   ^
+
+`formatMember` is not exposed by `shop.members`.
+```
+
+`exposing` is the module's contract. The `shop.members` module from the previous section exposes
+`Member` and `lookupAndFormat` and keeps `formatMember` to itself, so another module cannot reach
+it, by import or by qualified name. A behavior's `let` is never exposed. Other modules see the
+declaration and call it. A module with no `exposing` clause publishes everything it declares.
+
+For every exposed `data`, the compiler derives decoders from bare maps, JSON and database rows, and
+the matching encoder. You do not write them, and they cannot drift from the declaration. A decoder
+runs the invariants, so malformed input becomes a reported failure with the path to the field
+instead of a bad value inside the domain. On the Java side the constructor of a `data` is not
+public, so a `Member` that exists is one that passed its checks. The [Java](/java/) page shows how
+Java implements an injected behavior and calls a pipeline.
+
+## What Souther leaves out
+
+```text
+Absent from the language:
+
+  mutable variables      files
+  field assignment       network
+  static mutable state   threads
+  random                 exceptions
+  current time           reflection
+  environment variables  arbitrary JVM calls
+```
+
+A behavior depends on its inputs and on the dependencies it names, and on nothing else. That is
+what makes an `example` evaluable at compile time, what keeps a business outcome apart from an
+infrastructure failure, and what lets a reader find every place a value can come from. Everything
+on the list arrives through an injected behavior named in `depends on`, or stays in Java.
+
+## Next steps
+
+- Build a model step by step in the [tutorial](/tutorial/), which grows a business-trip approval
+  model from its examples.
+- Read the [principles](/principles/) for why the language is shaped this way.
+- The [specification](https://github.com/souther-lang/souther/blob/main/specification.adoc) states
+  every rule the tour touched, with its error code.
+- The [command line](/cli/) page lists every `souther` command and option.
