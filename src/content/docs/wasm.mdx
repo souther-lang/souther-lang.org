@@ -181,10 +181,10 @@ wrote cart.component.wasm from 1 source
 
 ## Call it from JavaScript
 
-The npm package `@souther/wasm` loads a module, calls it and writes a TypeScript binding from the `souther:surface` section. It needs Node 22 or later, or a browser with ES2024. It asks for `@raoh/core` as a peer dependency, because the issues it reports are Raoh issues and a decoder of the model's can be a part of one the page writes.
+The npm package `@souther-lang/wasm` loads a module, calls it and writes a TypeScript binding from the `souther:surface` section. It needs Node 22 or later, or a browser with ES2024. It asks for `@raoh/core` as a peer dependency, because the issues it reports are Raoh issues and a decoder of the model's can be a part of one the page writes.
 
 ```sh
-npm install @souther/wasm @raoh/core@^0.9.0
+npm install @souther-lang/wasm @raoh/core@^0.9.0
 ```
 
 Write the binding from the compiled module:
@@ -274,7 +274,7 @@ For a product code that does not match the pattern, the same call reports where 
 
 ## The host contract in brief
 
-This section is for a host written without `@souther/wasm`, in any language with a wasm engine. The full ABI is in the [backend's README](https://github.com/souther-lang/souther-wasm-compiler#the-host-contract).
+This section is for a host written without `@souther-lang/wasm`, in any language with a wasm engine. The full ABI is in the [backend's README](https://github.com/souther-lang/souther-wasm-compiler#the-host-contract).
 
 A core module exports these functions. The listing is `wasm-tools print cart.wasm` filtered to its exports:
 

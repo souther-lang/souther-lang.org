@@ -68,13 +68,12 @@ Building the backend from a clone needs a Rust toolchain, because the driver and
 
 ## Compile a library
 
-The command takes a `.sou` file or a directory of them. `-o` writes one object file. `--library` writes the directory above, and `--php`, `--rust` and `--go` each add a binding of it.
+The command takes a `.sou` file or a directory of them. `-o` writes one object file. `--library` writes the directory above, and each `--binding` adds a binding of it.
 
 ```text
 souther compile --target native [--offline] [-cp <path>] -o <object> <source>...
 souther compile --target native [--offline] [-cp <path>] --library <dir>
-    [--with <object>]... [--php <dir> --namespace <value>] [--rust <dir> --crate <value>]
-    [--go <dir> --package <value>]
+    [--with <object>]...
     [--binding <generator> <dir> [--binding-option <key>=<value>]...]...
     <source>...
 souther compile --target native --fetch
@@ -86,14 +85,16 @@ souther compile --target native --fetch
 | `--library <dir>` | where to write the library: object, headers, manifest, shared library |
 | `--with <object>` | the object another build the program imports was compiled to |
 | `-cp <path>` | the class path of other builds the program imports, as the `souther` command takes it |
-| `--php <dir>` | where to write the PHP binding |
-| `--namespace <value>` | the PHP namespace the binding is written under |
-| `--rust <dir>` | where to write the Rust binding |
-| `--crate <value>` | the name of the crate the binding is |
-| `--go <dir>` | where to write the Go binding |
-| `--package <value>` | the import path of the Go module the binding is |
-| `--binding <generator> <dir>` | a binding written by someone else's generator |
+| `--binding <generator> <dir>` | where to write a binding, and which generator writes it: `php`, `rust` or `go`, or someone else's generator as `groupId:artifactId:version@sha256:<hex>` or a path to its jar |
 | `--binding-option <key>=<value>` | an option of the `--binding` before it |
+
+The built-in generators take one option each, which the generator requires:
+
+| Generator | Option |
+| --- | --- |
+| `php` | `namespace`, the PHP namespace the binding is written under |
+| `rust` | `crate`, the name of the crate the binding is |
+| `go` | `package`, the import path of the Go module the binding is |
 
 The commands below use the cart model from the backend's [examples/cart-model](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/cart-model), copied into a directory named `model`. It declares `addItemToCart`, `placeOrder` and `issueQuote`, and five behaviors the host implements over its database.
 
@@ -110,7 +111,8 @@ wrote cart.o from 1 source
 The library and the PHP binding, under the namespace `Acme\Shop`:
 
 ```sh
-souther compile --target native --library build/native --php build/php --namespace 'Acme\Shop' model
+souther compile --target native --library build/native \
+  --binding php build/php --binding-option 'namespace=Acme\Shop' model
 ```
 
 ```text
@@ -121,7 +123,8 @@ wrote the binding build/php with the PHP generator
 The library and the Rust binding, as a crate named `acme`:
 
 ```sh
-souther compile --target native --library build/native --rust build/rust --crate acme model
+souther compile --target native --library build/native \
+  --binding rust build/rust --binding-option crate=acme model
 ```
 
 ```text
@@ -132,7 +135,8 @@ wrote the binding build/rust with the Rust generator
 The library and the Go binding, as a module at the import path `example.com/acme`:
 
 ```sh
-souther compile --target native --library build/native --go build/go --package example.com/acme model
+souther compile --target native --library build/native \
+  --binding go build/go --binding-option package=example.com/acme model
 ```
 
 ```text
