@@ -1,0 +1,315 @@
+---
+title: Native
+description: Compile a Souther model to a shared library and call it from PHP, Rust or Go through a generated binding.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page compiles a Souther model to a native library and calls it from PHP, Rust and Go. It is for anyone who wants to run the same business rules where there is no JVM and no wasm engine.
+
+## What you get
+
+`souther compile --target native` writes an object file the system linker takes. With `--library` it writes everything a host needs into one directory:
+
+| File | What it is |
+| --- | --- |
+| `souther.o` | the object, one symbol per published behavior, type and value |
+| `libsouther.dylib` or `libsouther.so` | the object linked with the runtime as a shared library |
+| `souther.ffi.h` | C declarations of every function a host calls, with no preprocessor directive, for `FFI::cdef` and the like |
+| `souther.h` | the same declarations wrapped for a C or C++ compiler, with static assertions of every type's size |
+| `souther.json` | the manifest the command reads to write a binding |
+
+A binding is source in the host's language, written from the manifest, that calls the library through the host's FFI. The command ships three: PHP, Rust and Go. Each runs on a runtime package of its own, and the binding depends on that package so the host names nothing else.
+
+## Install the backend
+
+The native backend is the jar `souther-native-compiler-0.1.0-backend.jar`, released on Maven Central under `org.souther-lang`. Each backend release is built against one Souther release, and the jar for Souther 0.4.0 is the backend's `0.1.0`.
+
+Put the jar into `$SOUTHER_HOME/backends`:
+
+```sh
+export SOUTHER_HOME="$HOME/.souther"
+mkdir -p "$SOUTHER_HOME/backends"
+curl -L -o "$SOUTHER_HOME/backends/souther-native-compiler-0.1.0-backend.jar" \
+  https://repo1.maven.org/maven2/org/souther-lang/souther-native-compiler/0.1.0/souther-native-compiler-0.1.0-backend.jar
+```
+
+The `souther` command finds the jar by its `META-INF/souther/backend.properties`, which names the target `native` and the Souther it was built against. A jar built against another Souther is refused with exit status 2 before anything runs. The [WebAssembly](/wasm/#install-the-backend) page says more about how a backend is found.
+
+The jar is one artifact. What a build needs beyond it is fetched the first time it is needed and kept under `~/.souther`, or under `$SOUTHER_HOME` where that is set. The driver for your platform comes from the backend's GitHub release at the same version. The generator of each binding you ask for comes from Maven Central. Nothing else is fetched: a host that never asks for the Rust binding never has the Rust generator.
+
+What is fetched is run, so each file is held to a SHA-256 written into the backend jar when it was released. A file that does not match is refused and not kept. What is kept is checked again every time it is used.
+
+| Flag | What it does |
+| --- | --- |
+| `--fetch` | fetch the driver and every generator now, then stop |
+| `--offline` | fetch nothing, and use only what is already kept |
+
+Prepare a machine that may not reach the network later:
+
+```sh
+souther compile --target native --fetch
+```
+
+A driver is released for these platforms:
+
+| OS | Architecture |
+| --- | --- |
+| Linux | x86_64, aarch64 |
+| macOS | x86_64, aarch64 |
+
+Linking the shared library needs a C compiler on the machine. On macOS that is the Command Line Tools, and on Linux `cc`.
+
+<Aside type="note">
+Building the backend from a clone needs a Rust toolchain, because the driver and the runtime are a Cargo workspace. `scripts/souther-native` in the clone builds both and runs the command. A clone's build fetches nothing and runs the driver it built.
+</Aside>
+
+## Compile a library
+
+The command takes a `.sou` file or a directory of them. `-o` writes one object file. `--library` writes the directory above, and each `--binding` adds a binding of it.
+
+```text
+souther compile --target native [--offline] [-cp <path>] -o <object> <source>...
+souther compile --target native [--offline] [-cp <path>] --library <dir>
+    [--with <object>]...
+    [--binding <generator> <dir> [--binding-option <key>=<value>]...]...
+    <source>...
+souther compile --target native --fetch
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-o <object>` | where to write the object file |
+| `--library <dir>` | where to write the library: object, headers, manifest, shared library |
+| `--with <object>` | the object another build the program imports was compiled to |
+| `-cp <path>` | the class path of other builds the program imports, as the `souther` command takes it |
+| `--binding <generator> <dir>` | where to write a binding, and which generator writes it: `php`, `rust` or `go`, or someone else's generator as `groupId:artifactId:version@sha256:<hex>` or a path to its jar |
+| `--binding-option <key>=<value>` | an option of the `--binding` before it |
+
+The built-in generators take one option each, which the generator requires:
+
+| Generator | Option |
+| --- | --- |
+| `php` | `namespace`, the PHP namespace the binding is written under |
+| `rust` | `crate`, the name of the crate the binding is |
+| `go` | `package`, the import path of the Go module the binding is |
+
+The commands below use the cart model from the backend's [examples/cart-model](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/cart-model), copied into a directory named `model`. It declares `addItemToCart`, `placeOrder` and `issueQuote`, and five behaviors the host implements over its database.
+
+An object file alone:
+
+```sh
+souther compile --target native -o cart.o model
+```
+
+```text
+wrote cart.o from 1 source
+```
+
+The library and the PHP binding, under the namespace `Acme\Shop`:
+
+```sh
+souther compile --target native --library build/native \
+  --binding php build/php --binding-option 'namespace=Acme\Shop' model
+```
+
+```text
+wrote the library build/native from 1 source
+wrote the binding build/php with the PHP generator
+```
+
+The library and the Rust binding, as a crate named `acme`:
+
+```sh
+souther compile --target native --library build/native \
+  --binding rust build/rust --binding-option crate=acme model
+```
+
+```text
+wrote the library build/native from 1 source
+wrote the binding build/rust with the Rust generator
+```
+
+The library and the Go binding, as a module at the import path `example.com/acme`:
+
+```sh
+souther compile --target native --library build/native \
+  --binding go build/go --binding-option package=example.com/acme model
+```
+
+```text
+wrote the library build/native from 1 source
+wrote the binding build/go with the Go generator
+```
+
+The three bindings can be asked for in one command. After it, `build/native` holds the five files and each binding directory holds one module per Souther module:
+
+```text
+build/native:
+libsouther.dylib
+souther.ffi.h
+souther.h
+souther.json
+souther.o
+
+build/php:
+Binding.php
+Com
+autoload.php
+souther.ffi.h
+```
+
+Each directory is replaced whole on every build, so a type the model no longer declares does not survive. A directory that no binding wrote, holding anything, is refused rather than deleted. The command exits with 0 when it wrote everything, 1 when the build is refused, and 2 when the command line is refused.
+
+## Use it from PHP
+
+The runtime is the Composer package `souther-lang/php-runtime`. It needs PHP 8.2 or later with `ext-ffi`. Require it beside the binding, and map the binding's namespace to its directory:
+
+```json
+{
+    "require": {
+        "souther-lang/php-runtime": "^0.1"
+    },
+    "autoload": { "psr-4": { "Acme\\Shop\\": "build/php/" } }
+}
+```
+
+Load the library once, and make every call inside a run. A run opens a scope of the library's arena and closes it when the closure returns, so every value made in it is gone after. A value that has to outlive its run leaves it as JSON through `encode`.
+
+```php
+use Acme\Shop\Binding;
+use Acme\Shop\Com\Example\Cart\Domain\{Behaviors, Injections};
+
+$binding = Binding::load(__DIR__ . '/build/native/libsouther.dylib');
+
+$json = $binding->run(
+    fn () => Behaviors::placeOrder($orderId, $userId, $orderer)->encode(),
+    Injections::of(priceCart: $priceCart, saveOrder: $saveOrder),
+);
+```
+
+A module is a namespace under the one you named, so `com.example.cart.domain` is `Acme\Shop\Com\Example\Cart\Domain`. A product or a newtype is a `final readonly` class with `of`, `decode`, `encode` and a reader per field. A behavior is a static function on `Behaviors`. The behaviors the host implements are passed to the run through `Injections::of`, one closure per name. A call that reaches a behavior nothing was passed for throws `UnboundInjection`.
+
+A construction that does not hold an invariant is a Raoh `Result` with `invariant_violation`. A Souther computation that ends without a value throws `SoutherAbort`. The [PHP runtime README](https://github.com/souther-lang/souther-native-compiler/blob/develop/bindings/php/runtime/README.md) covers runs, preloading and every exception.
+
+## Use it from Rust
+
+The generated crate depends on `souther-binding-runtime` from crates.io and re-exports what a host names. A host depends on the generated crate by path:
+
+```toml
+[dependencies]
+acme = { path = "build/rust" }
+```
+
+`Library::load` opens the library by path and looks every function up through that handle. It is `unsafe`, because a library built from another program may export the same names, and it is the one `unsafe` a host writes.
+
+```rust
+use acme::com::example::cart::domain::{
+    AddItemToCart, LoadCartImplementation, LoadProductImplementation, SaveItemImplementation,
+};
+use acme::Library;
+
+// SAFETY: the library the binding was generated from.
+let library = unsafe { Library::load("build/native/libsouther.dylib") }?;
+
+let load_product = LoadProductImplementation::new(&library, SqlLoadProduct(&transaction));
+let load_cart = LoadCartImplementation::new(&library, SqlLoadCart(&transaction));
+let save_item = SaveItemImplementation::new(&library, SqlSaveItem(&transaction));
+let add_item = AddItemToCart::bind(&library, &load_product, &load_cart, &save_item);
+
+let answer = library.run(|run| add_item.call(run, user_id, product_id, quantity))?;
+```
+
+What the PHP runtime checks while a program runs, the Rust types check when it is built. `library.run(|run| ...)` opens a run whose lifetime is the closure's, and a value is a handle of that lifetime, so no value leaves the run. A behavior the host implements is a trait with `apply`, and `bind` takes a reference to each implementation a behavior requires, so a missing one does not compile. The [Rust runtime README](https://github.com/souther-lang/souther-native-compiler/blob/develop/bindings/rust/runtime/README.md) has the rest.
+
+## Use it from Go
+
+The binding is one Go module, with a `go.mod` that requires the runtime `github.com/souther-lang/souther-native-compiler/bindings/go/runtime` and Raoh. A host requires it by path and runs `go mod tidy` once. cgo builds it, so a C compiler is needed.
+
+```text
+require example.com/acme v0.0.0
+replace example.com/acme => ./build/go
+```
+
+`Load` opens the library with `dlopen`, asks its ABI generation and looks every function up before it returns. A behavior that requires nothing is a function of its package. One that requires something is bound with `Bind<Name>` to the host's implementations and called with `Call`.
+
+```go
+import (
+	acme "example.com/acme"
+	"example.com/acme/com/example/cart/domain"
+)
+
+library, err := acme.Load("build/native/libsouther.dylib")
+if err != nil {
+	return err
+}
+err = library.Run(func(r *acme.Run) error {
+	placeOrder := domain.BindPlaceOrder(r, priceCart, saveOrder)
+	answer, err := placeOrder.Call(r, orderID, userID, orderer)
+	if err != nil {
+		return err
+	}
+	switch answer := answer.(type) {
+	case domain.OrderPlaced:
+		return created(answer.Order().Encode())
+	case domain.EmptyCart:
+		return refused("empty_cart")
+	case domain.SaleEnded:
+		return refused("sale_ended")
+	case domain.ProductNotFound:
+		return refused("product_not_found")
+	}
+	return unanswered("placeOrder", answer)
+})
+```
+
+A behavior that returns a union returns an interface, and the host reads which case it is with a type switch. Every such interface ends its doc comment with `//sumtype:decl`, so `go-check-sumtype` fails a switch that leaves a case out. The [Go runtime README](https://github.com/souther-lang/souther-native-compiler/blob/develop/bindings/go/runtime/README.md) has the rest.
+
+## How values cross
+
+No JSON crosses between a host and the library unless the host asks for it. A value lives in an arena, one per thread, and nothing frees a value on its own. The host opens a scope with `souther_scope_open`, makes its calls, and closes the scope, which drops everything made since. Each binding's run is that scope. An `Int` crosses as 64 bits, a `Bool` as a byte, and text and every other value as an address the library handed out. A `Decimal` crosses as the two numbers the language says it is, its unscaled integer and its scale, and never as text. A `Rational` has no external form, so no behavior takes or returns one. A host asks a library `souther_abi_generation` before anything else and refuses a library of a generation it was not written for. The three runtimes do this on load. The whole contract is in [docs/host-abi.md](https://github.com/souther-lang/souther-native-compiler/blob/develop/docs/host-abi.md).
+
+## What of the language compiles
+
+The backend compiles what the Souther 0.4.0 standard library declares as a kernel, and every construct of the language below. The full account is [docs/language-coverage.md](https://github.com/souther-lang/souther-native-compiler/blob/develop/docs/language-coverage.md).
+
+| Area | Compiled | Not yet |
+| --- | --- | --- |
+| Numbers | `Int`, `Bool`, `Decimal` with every rounding mode, `Rational` inside a computation | a `Rational` crossing to a host |
+| Text | `String` as NFC UTF-8, every `String` kernel, `String.matches` and invariant patterns | |
+| Time | `Date`, `Time`, `DateTime`, `Instant` and their kernels | |
+| Collections | `List`, `Set`, `Map`, `Option`, tuples and function values | a list of a type a host has no way to hold |
+| Types | product, newtype, unit, sum, unions, invariants checked on every construction | |
+| Behaviors | `let` bodies, `depends on`, `guard`, `match`, `ensures`, host-implemented behaviors, imports from another build through `-cp` and `--with` | |
+| Boundary | a decoder and an encoder per published type, Raoh issue codes | a type variable no call settles |
+
+A program the backend cannot compile yet is refused with exit status 1 and a message that says what it is, apart from a program the language refuses.
+
+## Write your own binding
+
+A binding for another language is a generator jar written against `souther-bindings-api`, plus a runtime package in that language. The command runs a generator it is pointed at with `--binding`, named by its Maven coordinate and the SHA-256 of its jar. The digest is required, and nothing is trusted on first use.
+
+```sh
+souther compile --target native --library build/native \
+    --binding com.acme:souther-binding-kotlin:1.2.0@sha256:<64 hex> build/kotlin \
+    --binding-option package=com.acme.shop \
+    model
+```
+
+A path ending in `.jar` names your own build instead, and no digest is asked for. The generator runs behind a class loader that sees only the JDK, the API and the jar itself, so a binding is written from the library's model and nothing else. How the model is handed to a generator and what the jar's manifest must say is in [docs/writing-a-binding.md](https://github.com/souther-lang/souther-native-compiler/blob/develop/docs/writing-a-binding.md).
+
+## Examples
+
+The backend repository carries one model and three hosts of it:
+
+- [examples/cart-model](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/cart-model) is the cart used on this page, with its injected behaviors declared and faked for `example` rows.
+- [examples/php-cart](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/php-cart) serves it over HTTP with the injected behaviors implemented over PDO.
+- [examples/rust-cart](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/rust-cart) serves it with axum, bound per request to a SQLite transaction.
+- [examples/go-cart](https://github.com/souther-lang/souther-native-compiler/tree/develop/examples/go-cart) serves it with `net/http` and holds every type switch to the model's cases.
+
+## Next steps
+
+- [WebAssembly](/wasm/) compiles the same model to a module a browser loads.
+- [Java](/java/) is the built-in target, where injected behaviors are plain Java.

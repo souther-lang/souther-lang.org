@@ -37,9 +37,55 @@ export default defineConfig({
 				{ tag: 'meta', attrs: { name: 'twitter:image', content: 'https://souther-lang.org/og.png' } },
 			],
 			defaultLocale: 'en',
+			sidebar: [
+				{
+					label: 'Getting started',
+					items: [
+						{ label: 'Installation', slug: 'install' },
+						{ label: 'Quick start', slug: 'quickstart' },
+						{ label: 'Tutorial', slug: 'tutorial' },
+					],
+				},
+				{
+					label: 'Language',
+					items: [
+						{ label: 'Language tour', slug: 'tour' },
+						{ label: 'Principles', slug: 'principles' },
+						{
+							label: 'Specification',
+							link: 'https://github.com/souther-lang/souther/blob/main/specification.adoc',
+							attrs: { target: '_blank', rel: 'noopener' },
+						},
+					],
+				},
+				{
+					label: 'Tools',
+					items: [
+						{ label: 'Command line', slug: 'cli' },
+						{ label: 'Build plugins', slug: 'build' },
+						{ label: 'Editors and agents', slug: 'editors' },
+					],
+				},
+				{
+					label: 'Targets',
+					items: [
+						{ label: 'Java', slug: 'java' },
+						{ label: 'WebAssembly', slug: 'wasm' },
+						{ label: 'Native', slug: 'native' },
+					],
+				},
+			],
 			customCss: ['./src/styles/custom.css'],
 			expressiveCode: {
 				shiki: { langs: [southerGrammar] },
+				// Compiler output and shell commands wrap rather than scroll: a diagnostic or a
+				// report line cut at the column edge loses the part that says what went wrong.
+				// Source code keeps its layout and scrolls, because its line breaks mean something.
+				defaultProps: {
+					overridesByLang: {
+						'text,txt,sh,bash,shell,powershell,json': { wrap: true, preserveIndent: true },
+					},
+				},
 			},
 			components: {
 				// Puts a Souther sample beside the hero copy when a page sets `heroCode`.

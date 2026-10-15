@@ -4,26 +4,26 @@ description: Make business rules executable.
 template: splash
 hero:
   tagline: |
-    <p class="motto">A small JVM language for <strong>business rules that stay true</strong>.</p>
-    <p>Business software changes constantly. The rules that define it should not be scattered
-    across comments, constructors, exception handling and service calls. Souther turns the
-    <code>data</code> and <code>behavior</code> of a specification into executable domain types,
-    while making the constraints, construction paths, and external dependencies that specifications
-    often leave in comments explicit and checked.</p>
+    <p class="motto">Souther asks you only <strong>what only you can answer</strong>.</p>
+    <p>Business software is mostly code that follows from a few decisions: what a value may be,
+    which state follows which, what each case returns. Souther makes each of those decisions one
+    line, an <code>invariant</code>, a <code>constructs</code> clause, an <code>example</code> row,
+    and checks them on every compile. What follows from them is derived or delegated. What is still
+    undecided, the report hands back to you as a question.</p>
   actions:
+    - text: Get started
+      link: /install/
+      icon: right-arrow
+    - text: Take the language tour
+      link: /tour/
+      icon: right-arrow
+      variant: minimal
     - text: Build your first model
       link: /tutorial/
-      icon: right-arrow
-    - text: Read the principles
-      link: /principles/
       icon: right-arrow
       variant: minimal
     - text: Explore Souther on GitHub
       link: https://github.com/souther-lang/souther
-      icon: external
-      variant: minimal
-    - text: Read the specification
-      link: https://github.com/souther-lang/souther/blob/main/specification.adoc
       icon: external
       variant: minimal
 heroCode: |
@@ -43,11 +43,21 @@ heroCode: |
           else Rejected { reason = "high_cost" }
       Submitted { ...request, submittedAt = submittedAt }
   }
+
+  example submit
+      | "a cheap trip is submitted" :
+          ( DraftRequest { plannedCost = Amount(30000) }
+          , "2026-10-13" )
+          -> Submitted
+      | "an expensive trip is rejected" :
+          ( DraftRequest { plannedCost = Amount(250000) }
+          , "2026-10-13" )
+          -> Rejected { reason = "high_cost" }
 ---
 
 import FeatureRow from '../../components/FeatureRow.astro';
 
-## Model the rule, not its accidental implementation
+## Each decision is one line the compiler checks
 
 <FeatureRow title="Invalid values have nowhere to hide">
 <Fragment slot="prose">
@@ -109,6 +119,73 @@ data Submitted =
 </Fragment>
 </FeatureRow>
 
+<FeatureRow title="The compiler says which example is missing">
+<Fragment slot="prose">
+
+An `example` sits next to the behavior it describes and runs on every compile. A row that stops
+holding fails the build, so the documentation and the check are the same text.
+
+`souther examples` then reads the behavior's own rules and asks what the rows leave untested. The
+two rows in the hero model cover both outcomes, and the report still finds three gaps: nobody has
+stood on the 100000 threshold, one step past it, or on the zero that `Amount` allows. A gap is not
+a coverage number. It is the next question to ask the business.
+
+</Fragment>
+<Fragment slot="code">
+
+```text
+trip                                        measurement: complete
+  submit            implemented   rows 2    pending 0
+    signature   out specified 2/2  observed 2/2  verified 2/2
+    partition   axes 1   equivalence partitions 2/2
+    border      borders 2   obligations 3/5
+      ! no row is at the ON point (comparison@15:37)
+          · read as submit/request.plannedCost: = 100000
+      ! no row is at the OFF point (comparison@15:37)
+          · read as submit/request.plannedCost: = 100001
+    branch      2/2
+    decision    rules 2   taken 2
+  declarations   obligations 0/1
+  Amount
+      ! no row is at the ON point value = 0 (invariant Amount #1)
+
+adequacy: not satisfied
+3 gaps marked `!`: what a strict build refuses over.
+```
+
+</Fragment>
+</FeatureRow>
+
+<FeatureRow title="The gaps drive the model" reverse>
+<Fragment slot="prose">
+
+`--generate` writes the missing rows with the inputs filled in and the answer left as `<?>`. Filling
+one in means asking what the rule says at 100000 exactly, and at 0. Sometimes the answer is a value.
+Sometimes it is a new outcome the model did not have, a state that needs its own type, or a
+threshold the business has never written down.
+
+That loop is how a Souther model is built: write the operations you know, write the examples you
+have, read what the report says is missing, and refine the types until every row is answered. The
+[tutorial](/tutorial/) grows a whole approval workflow this way, and `--strict` turns the last
+report into a build that refuses to ship with a question open.
+
+</Fragment>
+<Fragment slot="code">
+
+```sh
+souther examples trip.sou --generate
+```
+
+```sou
+example submit
+    | (DraftRequest { plannedCost = Amount(100000) }, "x") -> <?>
+    | (DraftRequest { plannedCost = Amount(100001) }, "x") -> <?>
+    | (DraftRequest { plannedCost = Amount(0) }, "x")      -> <?>
+```
+
+</Fragment>
+</FeatureRow>
+
 <FeatureRow title="A rejection is domain data, not an exception">
 <Fragment slot="prose">
 
@@ -160,9 +237,13 @@ behavior submit : (request: Draft, submittedAt: String)
 ```
 
 ```text
-error E1002:
-Behavior `changeEmail` constructs `Member`
-but does not declare `constructs Member`.
+-- INSUFFICIENT CONSTRUCTION AUTHORITY  E1002 -member.sou:4:1
+
+4| behavior changeEmail : (name: String) -> Member | Rejected
+   ^
+
+Behavior `changeEmail` constructs `Member` but does not declare `constructs Member`.
+Hint: Add `constructs Member` to `changeEmail`, or stop constructing Member here.
 ```
 
 </Fragment>
@@ -260,39 +341,6 @@ let approvalDepth (e: Employee): Int =
 ```text
 error E1301:
 `null` is not part of the language. Use an optional field with `?`.
-```
-
-</Fragment>
-</FeatureRow>
-
-<FeatureRow title="Examples make rules executable—and reveal what is missing" reverse>
-<Fragment slot="prose">
-
-An `example` sits next to the behavior it describes and is evaluated during compilation. If the
-behavior stops agreeing with it, the build fails. `souther examples` additionally reports coverage
-gaps. The example is executable documentation rather than a separate test model that can drift from
-the rule.
-
-They are written where the rule is, so the threshold that decides `PricedCart` from `EmptyCart` is
-readable beside the code that implements it — the documentation and the check are the same text.
-Its report also identifies untested output cases, decision boundaries, and partitions. A gap is not
-just a coverage number: it is the next question to ask of the domain.
-
-</Fragment>
-<Fragment slot="code">
-
-```sou
-example quote
-    | "all lines valid -> a priced cart" :
-        (Cart { open = true, items =
-            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ] })
-        -> PricedCart { items =
-            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ]
-            , total = 300, highValue = false }
-    | "a closed cart -> empty" :
-        (Cart { open = false, items =
-            [ LineItem { sku = Sku("apple"), quantity = 2, unitPrice = 150 } ] })
-        -> EmptyCart
 ```
 
 </Fragment>
@@ -427,9 +475,10 @@ public final class JdbcFindMember extends FindMember {
     @Override
     public FindMemberResult apply(MemberId id) {
         // ...
-        return switch (Member.decoder().decode(raw, Path.ROOT)) {
-            case Ok<Member> ok   -> ok.value();
-            case Err<Member> err -> CorruptRecord();  // inherited factory
+        return switch (Member.decoder().decode(raw)) {
+            case Ok<Member>(var member) -> member;
+            // an inherited protected factory
+            case Err<Member> _ -> CorruptRecord();
         };
     }
 }
@@ -442,7 +491,8 @@ public final class JdbcFindMember extends FindMember {
 <Fragment slot="prose">
 
 Identifiers are Unicode. When the rule is discussed in Japanese, the type can be named 金額 and the
-behavior 提出する; the backend generates legal Java identifiers underneath.
+behavior 提出する. The name reaches the class file as it was written, so Java code calls
+`提出する` by that name.
 
 The point is not the character set. It is that the term in the rulebook and the term in the type
 system are the same string, so there is no glossary mapping 予定費用 to `plannedCost` for someone to
@@ -475,7 +525,8 @@ let 提出する (申請, 提出日時) = {
 <Fragment slot="prose">
 
 Not "should not" — cannot. There is no syntax for reading a clock, opening a socket or mutating a
-field, and calling an arbitrary JVM method is `E1401`.
+field. A Java class named in an expression is not a JVM call; it is a name that is not in scope,
+`E1023`.
 
 Everything that touches the world arrives as an injected behavior named in `depends on`. A domain
 computation therefore depends on its inputs and nothing else, which is what makes an `example`
@@ -502,8 +553,8 @@ Absent from the language:
 <Fragment slot="prose">
 
 Each compile error has a stable code that identifies it independently of language, with the prose
-rendered in the locale you select. `--format json` emits the same diagnostic as structured data for
-tooling.
+rendered in the locale you select with `--lang`. `--format json` emits the same diagnostic as
+structured data for tooling, and the same diagnostics appear inline in the editor.
 
 The catalogue is part of the specification rather than a by-product of the implementation. `E1002`
 and `E1006` are what keep `constructs` honest; `E1603` does the same for `depends on`.
@@ -512,21 +563,29 @@ and `E1006` are what keep `constructs` honest; `E1603` does the same for `depend
 <Fragment slot="code">
 
 ```text
-error E1001:
-Data `Email` cannot be constructed directly.
-Use `Email.decoder` or a behavior declared with `constructs Email`.
+-- NON-EXHAUSTIVE MATCH  E1201 ----------------trip.sou:8:5
+
+8|     match r with
+       ^^^^^
+
+This `match` on data `TripRequest` does not cover every case.
+Hint: Add a case for: PreApproved
 ```
 
 ```text
-error E1201:
-Non-exhaustive match for data `TripRequest`.
-Missing case: PreApproved
+-- USE OF NULL  E1301 ------------------------employee.sou:5:46
+
+5| let top (id) = Employee { id = id, manager = null }
+                                                ^^^^
+
+`null` is not part of the language. Use an optional field with `?`.
 ```
 
-```text
-error E1302:
-Exceptions are not supported.
-Return a failure case in the output sum.
+```json
+{"severity":"error","code":"E1201","file":"trip.sou",
+ "region":{"startLine":8,"startCol":5,"endLine":8,"endCol":10},
+ "message":"This `match` on data `TripRequest` does not cover every case.",
+ "hints":[{"message":"Add a case for: PreApproved"}]}
 ```
 
 </Fragment>
@@ -539,9 +598,11 @@ composition. It intentionally omits `null`, mutable state, exceptions and arbitr
 result is a domain model whose construction paths, business outcomes and dependencies remain
 visible.
 
-Souther compiles to JVM class files. Generated data and behavior types are designed to be used from
-Java, while Java remains responsible for infrastructure and integration. Souther requires Java 25
-or later for both compilation and integration.
+Souther compiles to JVM class files by default. Generated data and behavior types are designed to
+be used from Java, while Java remains responsible for infrastructure and integration. Souther
+requires Java 25 or later for both compilation and integration. The same checked program can also
+be compiled to a [WebAssembly module](/wasm/) for the browser and other wasm hosts, or to a
+[native shared library](/native/) with bindings for PHP, Rust and Go.
 
 Business outcomes, invalid boundary input, model bugs, and platform failures remain distinct. A
 rejection such as `InsufficientFunds` is a case in a behavior's output; malformed input is reported
@@ -551,14 +612,18 @@ an infrastructure failure or a programming defect from being mistaken for a busi
 
 ## Tooling
 
-The compiler, runtime, CLI, language server and VS Code extension are open source. The extension
-gives semantic highlighting, hover, go-to-definition and inline diagnostics over the same
-diagnostics the CLI emits, and `souther-fmt` formats sources to a single layout.
+Everything is open source: the compiler, the runtime, the [command line](/cli/), the language
+server, the [VS Code extension](/editors/), and the [Maven and Gradle plugins](/build/).
 
-Start with a single self-contained file: `souther run` decodes JSON input, runs an exposed behavior
-with no external dependencies, and prints JSON output. When the model is ready to integrate, `souther
-compile` generates Java 25 class files; Java supplies the database, clock, HTTP client, and other
-infrastructure through declared behaviors.
+Start with a single self-contained file. `souther run` decodes JSON input, runs a behavior, and
+prints JSON output. `souther examples` reports which inputs, boundaries and decision rules the
+`example` rows beside a behavior cover, and writes rows for the gaps. `souther fmt` formats sources
+to a single layout. When the model is ready to integrate, `souther init` writes a Maven or Gradle
+project, and the build plugin compiles `.sou` files before Java sees them.
+
+The `souther` binary also answers questions about the language itself. `souther doc` reads the
+specification the compiler was built from, `souther api` prints the standard library's signatures,
+and `souther mcp` serves both to coding agents over the Model Context Protocol.
 
 ## Built for the part of software that must stay true
 
@@ -567,7 +632,11 @@ must follow a state transition, or decisions whose outcomes should be understood
 system.
 
 <p className="closing-links">
-	<a href="https://github.com/souther-lang/souther">View the source on GitHub</a>
+	<a href="/install/">Install Souther</a>
 	<span aria-hidden="true">·</span>
-	<a href="https://github.com/souther-lang/souther/tree/main/examples/businesstrip">See the business trip example</a>
+	<a href="/tutorial/">Follow the tutorial</a>
+	<span aria-hidden="true">·</span>
+	<a href="https://github.com/souther-lang/examples">Browse the examples</a>
+	<span aria-hidden="true">·</span>
+	<a href="https://github.com/souther-lang/souther">View the source on GitHub</a>
 </p>

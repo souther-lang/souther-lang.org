@@ -1,0 +1,159 @@
+---
+title: Quick start
+description: Write a one-file Souther model, run it, read its coverage report and start a project.
+sidebar:
+  order: 2
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+This page takes about ten minutes. You write one `.sou` file, run a behavior in it, read what the `example` rows cover, and then start a Maven project. It needs the `souther` command from [Installation](/install/) and nothing else. Maven is needed only for the last step.
+
+<Steps>
+
+1. ### Write a model
+
+   Create a directory and put this file in it as `claim.sou`. It models an expense claim desk. A claim up to 500 is approved on the spot, and a larger one goes to review.
+
+   ```sou
+   data Amount = Int
+       invariant value >= 0
+
+   data Approved =
+       { amount: Amount
+       }
+   data NeedsReview =
+       { amount: Amount
+       }
+
+   behavior claim : (amount: Amount) -> Approved | NeedsReview
+       constructs Approved, NeedsReview
+
+   let claim (amount) = {
+       guard amount <= 500 else NeedsReview { amount = amount }
+       Approved { amount = amount }
+   }
+
+   example claim
+       | "a small claim"  : (Amount(120)) -> Approved { amount = Amount(120) }
+       | "at the limit"   : (Amount(500)) -> Approved { amount = Amount(500) }
+       | "over the limit" : (Amount(501)) -> NeedsReview { amount = Amount(501) }
+   ```
+
+   `Amount` is a newtype over `Int` with an `invariant`. No `Amount` below zero can exist anywhere in the program, because every construction checks the rule. `claim` is a `behavior` whose output is a sum of two cases. The `guard` returns the `NeedsReview` case and stops when its condition is false. The `example` rows are checked on every compile. A single file needs no `module` header. It is named after the file.
+
+2. ### Run a behavior
+
+   `souther run` compiles the file in memory, decodes `--input` as JSON, applies the behavior and prints the output as JSON. The file holds one behavior, so `--behavior` can be left out.
+
+   ```sh
+   souther run claim.sou --input '120'
+   ```
+
+   ```text
+   {"amount":120,"type":"Approved"}
+   ```
+
+   ```sh
+   souther run claim.sou --input '900'
+   ```
+
+   ```text
+   {"amount":900,"type":"NeedsReview"}
+   ```
+
+   Now give it an input the model refuses:
+
+   ```sh
+   souther run claim.sou --input '-5'
+   ```
+
+   ```text
+   input #1 could not be decoded — (root): must be non-negative
+   ```
+
+   The behavior never ran. The derived decoder checks the invariant of `Amount` at the boundary and reports the failure, so the body of `claim` only ever sees a valid `Amount`. The exit code is 1.
+
+3. ### Read the coverage report
+
+   `souther examples` reports what the `example` rows reach and what they do not:
+
+   ```sh
+   souther examples claim.sou
+   ```
+
+   ```text
+   claim                                                    measurement: complete
+     claim                    implemented   rows 3    pending 0
+       signature   out specified 2/2  observed 2/2  verified 2/2
+       partition   axes 1   equivalence partitions 2/2
+       border      borders 2   obligations 4/5
+         ! no row is at an OUT point (comparison@15:18)
+             · read as claim/amount: in 501 < amount
+         · no OFF point is owed at amount = 0 (invariant Amount #1): excluded — the rules leave no value there
+         · no OUT point is owed at amount = 0 (invariant Amount #1): excluded — the rules leave no value there
+       branch      2/2
+       decision    rules 2   taken 2
+       replacement 2/2
+     declarations   obligations 0/1
+     Amount
+         ! no row is at the ON point value = 0 (invariant Amount #1)
+
+   1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
+   adequacy: not satisfied
+   2 gaps marked `!`: what a strict build refuses over.
+   ```
+
+   The `partition` line says the guard divides the input into two classes, and a row stands in each. The `border` lines list the values each rule places on a boundary. The guard at line 15 has rows on 500 and 501, but no row well past it, and the invariant of `Amount` has no row at 0. The `decision` line says both rules of the body were taken by some row. The `adequacy` line is the verdict over all of this, and the two gaps marked `!` are what `souther examples --strict` refuses the build over. Add a row for `Amount(0)` and one for a value such as `Amount(2000)`, run the report again, and both gaps close.
+
+4. ### Start a project
+
+   For a model that Java code will call, `souther init` writes a Maven project. It takes a group and an artifact as one coordinate:
+
+   ```sh
+   souther init com.example:hello
+   ```
+
+   ```text
+       created  hello/pom.xml
+       created  hello/.gitignore
+       created  hello/src/main/souther/hello.sou
+                module com.example.hello
+
+       cd hello && mvn compile
+   ```
+
+   The `pom.xml` declares `souther-runtime` and the Souther Maven plugin, and `hello.sou` holds a small library-desk model with its `example` rows. Compile it:
+
+   ```sh
+   cd hello && mvn compile
+   ```
+
+   ```text
+   [INFO] --- souther:0.1.0:compile (default) @ hello ---
+   [INFO]
+   [INFO] --- resources:3.4.0:resources (default-resources) @ hello ---
+   [INFO] skip non existing resourceDirectory /Users/you/hello/src/main/resources
+   [INFO]
+   [INFO] --- compiler:3.15.0:compile (default-compile) @ hello ---
+   [INFO] No sources to compile
+   [INFO] ------------------------------------------------------------------------
+   [INFO] BUILD SUCCESS
+   [INFO] ------------------------------------------------------------------------
+   ```
+
+   The plugin compiles `src/main/souther` into `target/classes`, and the `example` rows are checked as part of that compile. The generated classes are ordinary Java 25 records and interfaces that Java and Kotlin code can use.
+
+   `souther init com.example:hello --build gradle` writes a Gradle build instead and tells you to run `gradle wrapper` first. `souther init --build none` writes only the source and a `.souther-version` file, for a project that compiles with `souther compile --target` and has no Java build.
+
+   <Aside type="tip">
+   Run `souther init` inside a directory that already has a `pom.xml` or a `build.gradle.kts`, with no coordinate. It reads the coordinate from the build and adds the source directory and the plugin declaration to it.
+   </Aside>
+
+5. ### Next steps
+
+   - [Tutorial](/tutorial/): build a business-trip approval model and close its coverage gaps one report at a time.
+   - [Language tour](/tour/): the whole language on one page.
+   - [Java](/java/): call the generated classes from Java.
+
+</Steps>

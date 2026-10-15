@@ -119,10 +119,16 @@
 }
 
 @media (min-width: 60rem) {
+	/* The code column is the wider one. Prose reads best at about 55 characters a line,
+	   and a Souther declaration or a report line needs closer to 75. */
 	.feature-row {
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
 		gap: 2rem 3rem;
 		margin-top: 4.5rem;
+	}
+
+	.feature-row.reverse {
+		grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 	}
 
 	.feature-row.reverse .feature-prose {

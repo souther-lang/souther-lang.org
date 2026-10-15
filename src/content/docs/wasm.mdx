@@ -1,0 +1,397 @@
+---
+title: WebAssembly
+description: Compile a Souther model to a WebAssembly module and call it from JavaScript or any core wasm runtime.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page compiles a Souther model to a WebAssembly module and calls it from JavaScript. It is for anyone who wants to run the same business rules in a browser, in Node or in a wasm runtime, with no JVM at hand.
+
+## What you get
+
+`souther compile --target wasm` writes one core WebAssembly module. Each published behavior becomes an export. The export takes the arguments of one call as a JSON array and returns a JSON object. The object is either `{"value": ...}` or `{"issues": [...]}`. An issue names the path in the arguments it is about.
+
+The values between the input and the output live in linear memory, in an arena the caller resets after every call. The module needs no garbage collector and no component runtime. It runs wherever core wasm runs: a browser, Node, wasmtime or an embedded engine.
+
+| Flag | What it writes |
+| --- | --- |
+| `-o <file>` | the core module |
+| `--component` | the same module wrapped as a WebAssembly component, one interface per Souther module |
+| `--wit <file>` | the WIT description of what the program exports and what it imports |
+
+The module also carries a `souther:surface` section. It is a JSON object that lists every behavior, its export name, its parameters and the types they are made of. The JavaScript package reads it to write a typed binding, and nothing about the model is written a second time by hand.
+
+## Install the backend
+
+The wasm backend is a jar, released as `souther-wasm-compiler-0.1.0-cli.jar` on the [souther-wasm-compiler](https://github.com/souther-lang/souther-wasm-compiler) release page. Each backend release is built against one Souther release. The jar for Souther 0.4.0 is the one attached to the backend's `v0.1.0` release.
+
+Put the jar into `$SOUTHER_HOME/backends`:
+
+```sh
+export SOUTHER_HOME="$HOME/.souther"
+mkdir -p "$SOUTHER_HOME/backends"
+curl -L -o "$SOUTHER_HOME/backends/souther-wasm-compiler-0.1.0-cli.jar" \
+  https://github.com/souther-lang/souther-wasm-compiler/releases/download/v0.1.0/souther-wasm-compiler-0.1.0-cli.jar
+```
+
+`souther compile --target <target>` looks for a backend in `$SOUTHER_HOME/backends` first, and then where a package manager installed one. A backend says what it is in `META-INF/souther/backend.properties`. The file has two keys: `name`, the target it answers to, and `souther.version`, the Souther it was built against. The command runs the jar only when `souther.version` is the version of the `souther` command itself. A jar built against another Souther is refused with exit status 2 before anything is compiled. Jars for several Souther versions can sit side by side.
+
+Check that the backend is found:
+
+```sh
+souther compile --target wasm --help
+```
+
+```text
+souther compile --target wasm — compiles a Souther program to WebAssembly
+
+  souther compile --target wasm <source or directory>... -o <file> [--component]
+      [--wit <file>]
+
+  -o <file>     where to write. Required.
+  --component   write a component, one interface per Souther module, rather than a
+                core module. A behavior crosses as func(arguments: string) -> string.
+  --wit <file>  also write what the program offers, as a reader of interfaces reads
+                it. The same whether a component is written or not.
+
+A directory is read for the .sou files under it, in the order their paths sort.
+```
+
+Everything after `--target wasm` belongs to the backend. The `souther` command reads none of it, `--help` included. When no jar is installed, the command says so:
+
+```text
+no target `wasm` is installed, and no backend is
+```
+
+To build the backend from a clone instead, run `mvn package` and link the jar it writes. A link rather than a copy means the command runs what the last build wrote.
+
+```sh
+git clone https://github.com/souther-lang/souther-wasm-compiler
+cd souther-wasm-compiler
+mvn package
+export SOUTHER_HOME="$PWD/.souther-home"
+mkdir -p "$SOUTHER_HOME/backends"
+ln -sf "$PWD"/target/souther-wasm-compiler-*-cli.jar "$SOUTHER_HOME/backends/"
+```
+
+<Aside type="note">
+The build needs no Rust toolchain. The runtime kernels are written in Rust, but the compiled wasm is carried in the repository and every build links against that copy.
+</Aside>
+
+## Compile a model
+
+The model below prices a basket. Put it in `src/cart.sou`.
+
+```sou
+module cart
+
+data Sku = String
+    invariant written = String.matches("[A-Z]{3}-[0-9]{4}", value)
+
+data Line = { sku: Sku, quantity: Int, unitPrice: Decimal }
+    invariant atLeastOne = quantity >= 1
+    invariant priced = unitPrice > 0.00m
+
+data Membership = Standard | Premium
+
+data Cart = { lines: List<Line>, member: Membership }
+
+data Priced = { subtotal: Decimal, discount: Decimal, shipping: Decimal, total: Decimal }
+
+data EmptyCart
+
+behavior price : (cart: Cart) -> Priced | EmptyCart
+    constructs Priced
+
+let lineTotal (line: Line): Decimal = Decimal.fromInt(line.quantity) * line.unitPrice
+
+let price (cart) = {
+    guard List.length(cart.lines) >= 1 else EmptyCart
+    let subtotal: Decimal = List.sum(List.map(lineTotal, cart.lines))
+    let discount: Decimal = match cart.member with
+        | Premium -> Decimal.round(2, HALF_UP, subtotal * 0.10m)
+        | Standard -> 0.00m
+    let after: Decimal = subtotal - discount
+    let shipping: Decimal = if after >= 5000.00m then 0.00m else 500.00m
+    Priced { subtotal = subtotal
+           , discount = discount
+           , shipping = shipping
+           , total = after + shipping
+           }
+}
+```
+
+Compile the directory. A directory is read for the `.sou` files under it, in the order their paths sort.
+
+```sh
+souther compile --target wasm src -o cart.wasm --wit cart.wit
+```
+
+```text
+wrote cart.wasm from 1 source
+```
+
+Nothing is written unless the whole program compiled. A compile error goes to the error stream, and the exit status is 1.
+
+`cart.wit` begins with a comment that explains the envelope. After it, the file says what the program exports:
+
+```text
+package root:component;
+
+world program {
+  export souther:program/cart;
+  export souther:decode/cart;
+}
+
+package souther:program {
+  interface cart {
+    record ended { reason: u32 }
+    price: func(arguments: string) -> result<string, ended>;
+  }
+}
+
+package souther:decode {
+  interface cart {
+    record ended { reason: u32 }
+    sku: func(value: string) -> result<string, ended>;
+    line: func(value: string) -> result<string, ended>;
+    membership: func(value: string) -> result<string, ended>;
+    cart: func(value: string) -> result<string, ended>;
+    priced: func(value: string) -> result<string, ended>;
+    empty-cart: func(value: string) -> result<string, ended>;
+    standard: func(value: string) -> result<string, ended>;
+    premium: func(value: string) -> result<string, ended>;
+  }
+}
+```
+
+`souther:program/cart` holds the behaviors. `souther:decode/cart` holds one function per published type, which reads a JSON value as that type and reports its issues. The `ended` record is a call the runtime ended without a value, with the reason as a number.
+
+To write a component instead of a core module, add `--component`. The component wraps the same core module, and `wasm-tools validate` accepts it.
+
+```sh
+souther compile --target wasm src -o cart.component.wasm --component
+```
+
+```text
+wrote cart.component.wasm from 1 source
+```
+
+## Call it from JavaScript
+
+The npm package `@souther-lang/wasm` loads a module, calls it and writes a TypeScript binding from the `souther:surface` section. It needs Node 22 or later, or a browser with ES2024. It asks for `@raoh/core` as a peer dependency, because the issues it reports are Raoh issues and a decoder of the model's can be a part of one the page writes.
+
+```sh
+npm install @souther-lang/wasm @raoh/core@^0.9.0
+```
+
+Write the binding from the compiled module:
+
+```sh
+souther-wasm-bindings cart.wasm -o src/cart.ts
+```
+
+```text
+wrote cart.ts from cart.wasm
+```
+
+The binding exports one type per declaration, a `Bound` interface and a `load` function. This is the part of `src/cart.ts` a page reads against:
+
+```ts
+export type Sku = string;
+export type Line = { readonly sku: Sku; readonly quantity: bigint; readonly unitPrice: souther.Decimal };
+export type Membership = "Standard" | "Premium";
+export type Cart = { readonly lines: readonly (Line)[]; readonly member: Membership };
+
+export interface Bound {
+  readonly program: souther.Program;
+  readonly modules: {
+    readonly cart: {
+      price(cart: Cart): souther.Reading<{ readonly type: "EmptyCart" } | ({ readonly type: "Priced" } & Priced)>;
+    };
+  };
+  readonly decode: { readonly cart: { readonly Cart: souther.Decoder<Cart>; /* one per type */ } };
+  readonly form: { readonly cart: { readonly Cart: souther.FormDecoder<Cart>; /* one per type */ } };
+}
+
+export async function load(source: souther.Source, supplied: Supplied = {}): Promise<Bound>;
+```
+
+A behavior is `bound.modules.<module>.<behavior>`. A type a value can be read as on its own is the decoder `bound.decode.<module>.<Type>`. The same type read from a form, where every box holds text, is `bound.form.<module>.<Type>`. An `Int` crosses as a `bigint` and a `Decimal` as `Decimal` from `@raoh/core`, so no amount passes through a JavaScript number.
+
+A page loads the module once and calls it on every change. This is the part of the React example that does the work:
+
+```ts
+import { load, type Bound } from "./cart.ts";
+
+const bound: Bound = await load("/cart.wasm");
+
+const cart = bound.form.cart.Cart.decode({ lines, member });
+const answer = cart.issues !== undefined ? cart : bound.modules.cart.price(cart.value);
+
+if (answer.issues === undefined && answer.value.type === "Priced") {
+  show(answer.value.total.toString());
+}
+```
+
+`price` returns a `Reading`. For a basket of two items at 1500.00 with a Premium membership, the value is:
+
+```json
+{
+  "value": {
+    "type": "Priced",
+    "subtotal": "3000",
+    "discount": "300",
+    "shipping": "500",
+    "total": "3200"
+  }
+}
+```
+
+A `Decimal` crosses out as its amount and not at its scale. `3000.00` is returned as `3000`. A model that means a number of places to show returns a `String` through `String.fromDecimal`.
+
+For a product code that does not match the pattern, the same call reports where and why:
+
+```json
+{
+  "issues": [
+    {
+      "path": "/0/lines/0/sku",
+      "code": "invalid_format",
+      "messageKey": "invalid_format",
+      "message": "invalid format",
+      "meta": { "pattern": "[A-Z]{3}-[0-9]{4}" }
+    }
+  ]
+}
+```
+
+`issues.at(["lines", 0, "sku"])` returns the issues at one path, which is what a form shows beside a field. `messageOf(issue, locale)` writes the sentence a person reads, in English or Japanese, from Raoh's catalogue.
+
+`load` checks three things before it returns, and refuses the module on any of them. The surface's `version` says how the module is to be read. The runtime's ABI version says how a call is made and how it ends. The binding's fingerprint, the SHA-256 of the surface it was generated from, says the module is the one the binding was written for. Generate the binding again whenever you compile the module again.
+
+## The host contract in brief
+
+This section is for a host written without `@souther-lang/wasm`, in any language with a wasm engine. The full ABI is in the [backend's README](https://github.com/souther-lang/souther-wasm-compiler#the-host-contract).
+
+A core module exports these functions. The listing is `wasm-tools print cart.wasm` filtered to its exports:
+
+```text
+(export "memory" (memory 0))
+(export "__ronto_alloc" (func 2))
+(export "__ronto_alloc_mark" (func 87))
+(export "__ronto_alloc_reset" (func 88))
+(export "__souther_abi_version" (func 89))
+(export "__souther_failure_addr" (func 115))
+(export "__souther_failure_generation" (func 116))
+(export "cabi_realloc" (func 176))
+(export "__souther_decode" (func 271))
+(export "cart.price" (func 270))
+```
+
+A behavior is exported as `<module>.<behavior>`. Strings cross as a pointer and a length into the exported memory. The host writes the arguments as one JSON array into a buffer from `__ronto_alloc`, calls the export, and reads one JSON object back. The object is `{"value": ...}` or `{"issues": [...]}`.
+
+The host brackets every call with `__ronto_alloc_mark` before and `__ronto_alloc_reset` after. An export returns a live pointer into the arena, so the reset comes after the bytes have been read out. Nothing is freed one allocation at a time. This contract is taken from [rontolisp](https://github.com/making/rontolisp), so a host that drives a rontolisp module drives a Souther module the same way.
+
+A call that ends without a value traps. Before it traps, the runtime writes a fixed-width record outside the arena, at `__souther_failure_addr`. The record carries a reason and a generation. A host that reads the generation before the call can tell a Souther abort from an ordinary wasm fault. Reason 3 is arguments that are not JSON, and reason 6 is a division by zero.
+
+The `souther:surface` custom section is one JSON object. It lists each module's behaviors with their export names, who implements each one, the parameter types and the return type, and every declaration those types name. A product says its fields, a newtype the type it wraps, a sum its cases and the form they travel in. A newtype or product also lists the names of its invariant clauses, in the order a failure is decided in. The object carries a `version`, and a reader refuses a version it does not read.
+
+`__souther_decode(number, pointer, length)` reads a JSON value as one type, its invariants included, and returns what a behavior export returns. Which number names which type is the declaration's `decode` entry in the surface. Only a type a module publishes has one. A number the module gives no type to ends the call.
+
+An issue follows the Souther specification's decoder error. It has a `path`, a JSON Pointer into the arguments, a `code`, a `messageKey` and `meta`. A newtype clause that is a standard constraint is reported as that constraint, such as `invalid_format` with its `pattern`. Any other clause is `invariant_violation` with the module, the type and the clause name. The fixtures in the backend's `conformance/issues` directory hold the wasm backend and the JVM backend to the same issues.
+
+## Supplying injected behaviors from the host
+
+A behavior that another system answers is declared with `depends on` and left without a body. On the JVM the host injects it. In wasm the host supplies it by name, from the list the module carries.
+
+```sou
+module rates
+
+data Pair = String
+
+behavior today : (pair: Pair) -> Decimal
+
+behavior convert : (pair: Pair, amount: Decimal) -> Decimal
+    depends on today
+
+let convert (pair, amount, today) = amount * today(pair)
+```
+
+```sh
+souther compile --target wasm src -o rates.wasm --wit rates.wit
+```
+
+```text
+wrote rates.wasm from 1 source
+```
+
+The WIT now imports what the program needs beside what it exports:
+
+```text
+world program {
+  import souther:reached/rates;
+  export souther:program/rates;
+  export souther:decode/rates;
+}
+
+package souther:reached {
+  interface rates {
+    today: func(arguments: string) -> string;
+  }
+}
+```
+
+In JavaScript, pass the implementation to `load` under `"<module>.<behavior>"`. The binding types what has to be supplied in `Supplied`, so a page that leaves one out does not compile. At run time `program.reachesOutFor` lists the same names.
+
+```ts
+const rates = await load("/rates.wasm", {
+  "rates.today": (pair) => today[pair],
+});
+```
+
+With `today` returning `150.25`, `convert("USDJPY", 10.00)` returns:
+
+```json
+{ "value": "1502.5" }
+```
+
+The implementation is a plain function and not a promise. A wasm call cannot be suspended in the middle, so what the model asks for must be something the page already holds: a fetched table, a stored value or the clock. Fetch first, then call.
+
+In a component, the same behaviors are imports under `souther:reached/<module>`, and the component runtime wires them.
+
+## What is not compiled yet
+
+A behavior that declares `depends on` and has no `let` is refused. The language takes it as a model on its way to being written, and the backend has nothing to emit for it.
+
+```sou
+module pending
+
+data Order = { total: Decimal }
+
+behavior approve : (order: Order) -> Bool
+    depends on limit
+
+behavior limit : () -> Decimal
+```
+
+```sh
+souther compile --target wasm src -o pending.wasm
+```
+
+```text
+this backend does not write that yet: pending.approve is not written, so there is nothing to emit for it
+```
+
+The exit status is 1 and no file is written. The JVM target compiles the same file, because a JVM host can inject `approve` as a whole. Write the `let`, or move the behavior out of the program you compile for wasm.
+
+## Example
+
+[examples/react-cart](https://github.com/souther-lang/souther-wasm-compiler/tree/develop/examples/react-cart) in the backend repository is the basket above priced from a React form. The rules live in `model/src/cart.sou` and nowhere else, and the page hands over what was typed and shows what came back. `npm run dev` compiles the model, writes the binding and starts Vite, so a renamed field in the model is a page that no longer compiles.
+
+## Next steps
+
+- [Native](/native/) compiles the same model to a shared library for PHP, Rust and Go.
+- [Command line](/cli/) covers the rest of the `souther` command, including `run` and `examples`.

@@ -1,0 +1,165 @@
+---
+title: Installation
+description: Install the souther command on macOS, Linux or Windows, and check that it runs.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+This page installs the `souther` command on your machine and checks that it runs. It is for anyone who wants to compile or run a Souther model from the command line.
+
+## Requirements
+
+Souther runs on JDK 25. The compiler, the classes it generates and `souther-runtime` are all Java 25 class files, so an older JDK cannot load them. Check which Java you have:
+
+```sh
+java -version
+```
+
+The first line of the output must name version 25 or later. If it does not, install a JDK 25 from your usual source before you continue. A JDK is needed rather than a JRE, because `souther japi` reads javadoc through the Java compiler.
+
+The Homebrew formula and the Scoop manifest below bring a Java runtime with them. The manual download and the `-Nojdk` Windows archive do not.
+
+<Aside type="note">
+On WSL2, install the JDK and Souther inside the Linux distribution. Check that `java -version` answers in the WSL shell, not only in Windows.
+</Aside>
+
+## Install Souther
+
+Pick the tab for your platform. Each one installs the same command line.
+
+<Tabs>
+<TabItem label="macOS and Linux">
+
+Install from the Souther Homebrew tap:
+
+```sh
+brew install souther-lang/souther/souther
+```
+
+The formula depends on the Homebrew `openjdk` package, so Homebrew installs a JDK when the machine has none. When `JAVA_HOME` is already set to a JDK 25 or later, the launcher uses that one instead.
+
+To tap first and install by bare name:
+
+```sh
+brew tap souther-lang/souther
+brew install souther
+```
+
+</TabItem>
+<TabItem label="Windows (Scoop)">
+
+Add the Souther bucket to [Scoop](https://scoop.sh) and install:
+
+```powershell
+scoop bucket add souther https://github.com/souther-lang/scoop-souther
+scoop install souther
+```
+
+Scoop installs the Windows archive that carries its own Java runtime, so no JDK is needed to compile or run a model. The one exception is `souther japi`, which reads javadoc through a compiler and needs a JDK on the machine.
+
+Use Scoop or `install.ps1`, not both. Each owns its own `PATH` entry.
+
+</TabItem>
+<TabItem label="Windows (install.ps1)">
+
+`install.ps1` installs a release for the current user without Scoop and without administrator rights:
+
+```powershell
+irm https://raw.githubusercontent.com/souther-lang/souther/main/install.ps1 | iex
+```
+
+The script downloads the latest release, checks it against the `SHA256SUMS` published beside it, unpacks it under `%LOCALAPPDATA%\Programs\souther` and adds one entry to the user `PATH`. Open a new terminal afterwards so the new `PATH` takes effect.
+
+Piping into `iex` passes no arguments. To pass one, run the script block instead. `-Version` takes a release without the `v`, `-Nojdk` installs the archive that expects a JDK 25 on the machine, and `-Uninstall` removes the directory and the `PATH` entry the script added:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/souther-lang/souther/main/install.ps1))) -Nojdk
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/souther-lang/souther/main/install.ps1))) -Uninstall
+```
+
+</TabItem>
+<TabItem label="Manual download">
+
+Every release attaches its files to the [GitHub Release](https://github.com/souther-lang/souther/releases). The commands below use v0.4.0. Replace it with the release you want.
+
+On macOS and Linux, `souther` is a launcher script with the compiler jar appended to it. Download it, check it against `SHA256SUMS`, and put it on your `PATH`:
+
+```sh
+mkdir -p ~/.local/bin
+cd ~/.local/bin
+curl -LO https://github.com/souther-lang/souther/releases/download/v0.4.0/souther
+curl -LO https://github.com/souther-lang/souther/releases/download/v0.4.0/SHA256SUMS
+shasum -a 256 --ignore-missing -c SHA256SUMS
+chmod +x souther
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+`SHA256SUMS` lists every file of the release, so `--ignore-missing` skips the ones you did not download. Add the `export` line to `~/.zshrc` or `~/.bashrc` to keep the command on your `PATH`. The launcher runs on the `java` it finds on `PATH`, which must be a JDK 25.
+
+On Windows, the release has two zip archives. Both unpack to one `souther` directory with the command at its root, so put that directory on `PATH`.
+
+| Archive | Command | Java |
+| --- | --- | --- |
+| `souther-0.4.0-windows-x64.zip` | `souther\souther.exe` | Bundled. Needs no JDK. |
+| `souther-0.4.0-windows-x64-nojdk.zip` | `souther\souther.cmd` | Reads `JAVA_HOME`, or takes `java` from `PATH`. |
+
+The `nojdk` archive is for a machine that has a JDK 25 already, or for a CI image that does not want a second runtime.
+
+</TabItem>
+</Tabs>
+
+## Verify the installation
+
+Open a new terminal and ask the command which version it is:
+
+```sh
+souther version
+```
+
+```text
+souther 0.4.0
+```
+
+`souther help` lists every command with one line saying what it does:
+
+```sh
+souther help
+```
+
+```text
+usage: souther <command> [options] [args]
+
+commands:
+  init      start a project, or add Souther to one
+  compile   compile to .class files, or for an installed target
+  run       run one behavior and print its output
+  fmt       format source, to stdout or in place
+  examples  how well the `example`s cover the model
+  doc       read the language specification
+  api       the stdlib surface and its signatures
+  japi      a dependency jar's public API, with javadoc
+  mcp       serve doc, api and japi over MCP stdio
+  lsp       serve the language server over LSP stdio
+  tooling   what an editor needs to start and configure the server, as JSON
+  help      what a command takes, and what its options mean
+  version   which Souther this is
+
+`souther help <command>` writes what one command takes, and `souther doc cli/commands` writes the whole of it.
+```
+
+If the shell reports that `souther` is not found, the directory it was installed into is not on `PATH` yet. Open a new terminal, or add the directory to `PATH` as the tab for your platform describes.
+
+## Editor support
+
+The [VS Code extension](https://marketplace.visualstudio.com/items?itemName=souther.souther) gives diagnostics, completion, go-to-definition, rename and formatting. It bundles the language server and downloads a Java 25 runtime when the machine has none, so it works without the `souther` command. Other editors and coding agents start the same server with `souther lsp`. See [Editors and agents](/editors/) for the setup of each one.
+
+## Compile targets
+
+The JVM target is built into `souther`, so `souther compile` writes `.class` files with nothing else installed. The [WebAssembly](/wasm/) and [Native](/native/) backends are separate jars. Installing one puts it where `souther compile --target wasm` or `souther compile --target native` finds it, and each target page says how.
+
+## Next steps
+
+- [Quick start](/quickstart/): write a one-file model, run it, read its coverage report and start a project, in ten minutes.
+- [Tutorial](/tutorial/): build a business-trip approval model step by step.
