@@ -25,18 +25,18 @@ A binding is source in the host's language, written from the manifest, that call
 
 ## Install the backend
 
-The native backend is the jar `souther-native-compiler-0.1.0-backend.jar`, released on Maven Central under `org.souther-lang`. Each backend release is built against one Souther release, and the jar for Souther 0.4.0 is the backend's `0.1.0`.
+The native backend is the jar `souther-native-compiler-0.5.0-backend.jar`, released on Maven Central under `org.souther-lang`. Each backend release is built against one Souther release and has that release's version, so the jar for Souther 0.5.0 is the backend's `0.5.0`. A fix to the backend alone is released as `0.5.0-1`.
 
-Put the jar into `$SOUTHER_HOME/backends`:
+`souther compile --target native` fetches the jar from Maven Central the first time it is needed, and `souther backend fetch native` fetches it ahead of a compile. To install it by hand instead, put the jar into `$SOUTHER_HOME/backends`:
 
 ```sh
 export SOUTHER_HOME="$HOME/.souther"
 mkdir -p "$SOUTHER_HOME/backends"
-curl -L -o "$SOUTHER_HOME/backends/souther-native-compiler-0.1.0-backend.jar" \
-  https://repo1.maven.org/maven2/org/souther-lang/souther-native-compiler/0.1.0/souther-native-compiler-0.1.0-backend.jar
+curl -L -o "$SOUTHER_HOME/backends/souther-native-compiler-0.5.0-backend.jar" \
+  https://repo1.maven.org/maven2/org/souther-lang/souther-native-compiler/0.5.0/souther-native-compiler-0.5.0-backend.jar
 ```
 
-The `souther` command finds the jar by its `META-INF/souther/backend.properties`, which names the target `native` and the Souther it was built against. A jar built against another Souther is refused with exit status 2 before anything runs. The [WebAssembly](/wasm/#install-the-backend) page says more about how a backend is found.
+The `souther` command finds the jar by its `META-INF/souther/backend.properties`, which names the target `native` and the Souther it was built against, and runs it only when that Souther is its own version. The [WebAssembly](/wasm/#install-the-backend) page says more about how a backend is found.
 
 The jar is one artifact. What a build needs beyond it is fetched the first time it is needed and kept under `~/.souther`, or under `$SOUTHER_HOME` where that is set. The driver for your platform comes from the backend's GitHub release at the same version. The generator of each binding you ask for comes from Maven Central. Nothing else is fetched: a host that never asks for the Rust binding never has the Rust generator.
 
@@ -170,7 +170,7 @@ The runtime is the Composer package `souther-lang/php-runtime`. It needs PHP 8.2
 ```json
 {
     "require": {
-        "souther-lang/php-runtime": "^0.1"
+        "souther-lang/php-runtime": "^0.2"
     },
     "autoload": { "psr-4": { "Acme\\Shop\\": "build/php/" } }
 }
@@ -273,7 +273,7 @@ No JSON crosses between a host and the library unless the host asks for it. A va
 
 ## What of the language compiles
 
-The backend compiles what the Souther 0.4.0 standard library declares as a kernel, and every construct of the language below. The full account is [docs/language-coverage.md](https://github.com/souther-lang/souther-native-compiler/blob/develop/docs/language-coverage.md).
+The backend compiles what the Souther 0.5.0 standard library declares as a kernel, and every construct of the language below. The full account is [docs/language-coverage.md](https://github.com/souther-lang/souther-native-compiler/blob/develop/docs/language-coverage.md).
 
 | Area | Compiled | Not yet |
 | --- | --- | --- |

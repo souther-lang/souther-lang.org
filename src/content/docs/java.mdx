@@ -84,7 +84,7 @@ let settle (request, currentBalance) =
 ```
 
 A Java project needs the generated classes and `souther-runtime` on its class path. The runtime
-is `org.souther-lang:souther-runtime:0.4.0` on Maven Central. It declares its own dependency on
+is `org.souther-lang:souther-runtime:0.5.0` on Maven Central. It declares its own dependency on
 Raoh, the decoder library the generated codecs are built from. The [build plugins](/build/) add
 both for you.
 
@@ -431,7 +431,7 @@ it as an infrastructure failure, with a retry, a rollback or a 503.
 `Compiler.compile(source)` compiles one module from a string and returns a
 `Map<String, ClassFileImage>` keyed by binary class name, where `bytes()` gives the class file.
 `Compiler.compileModules(List.of(sourceA, sourceB))` compiles several modules that import each
-other and returns them together. The compiler is `org.souther-lang:souther-compiler:0.4.0`, and
+other and returns them together. The compiler is `org.souther-lang:souther-compiler:0.5.0`, and
 the [build plugins](/build/) call it the same way.
 
 ```java

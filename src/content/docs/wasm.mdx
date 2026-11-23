@@ -25,18 +25,28 @@ The module also carries a `souther:surface` section. It is a JSON object that li
 
 ## Install the backend
 
-The wasm backend is a jar, released as `souther-wasm-compiler-0.1.0-cli.jar` on the [souther-wasm-compiler](https://github.com/souther-lang/souther-wasm-compiler) release page. Each backend release is built against one Souther release. The jar for Souther 0.4.0 is the one attached to the backend's `v0.1.0` release.
+The wasm backend is a jar, released on Maven Central as `org.souther-lang:souther-wasm-compiler` with the classifier `cli`. Each backend release is built against one Souther release and has that release's version. The jar for Souther 0.5.0 is `souther-wasm-compiler-0.5.0-cli.jar`. A fix to the backend alone is released as `0.5.0-1`.
 
-Put the jar into `$SOUTHER_HOME/backends`:
+`souther compile --target wasm` fetches the jar from Maven Central the first time it is needed, so nothing has to be installed first. To fetch it ahead of a compile, on a machine with network access:
+
+```sh
+souther backend fetch wasm
+```
+
+```text
+fetching souther-wasm-compiler 0.5.0 from https://repo.maven.apache.org/maven2/org/souther-lang/souther-wasm-compiler/0.5.0/souther-wasm-compiler-0.5.0-cli.jar
+```
+
+The jar is written to `$SOUTHER_HOME/backends`, or to `~/.souther/backends` where `SOUTHER_HOME` is not set, as `wasm-0.5.0.jar`. To install it by hand instead, put the jar there:
 
 ```sh
 export SOUTHER_HOME="$HOME/.souther"
 mkdir -p "$SOUTHER_HOME/backends"
-curl -L -o "$SOUTHER_HOME/backends/souther-wasm-compiler-0.1.0-cli.jar" \
-  https://github.com/souther-lang/souther-wasm-compiler/releases/download/v0.1.0/souther-wasm-compiler-0.1.0-cli.jar
+curl -L -o "$SOUTHER_HOME/backends/souther-wasm-compiler-0.5.0-cli.jar" \
+  https://repo1.maven.org/maven2/org/souther-lang/souther-wasm-compiler/0.5.0/souther-wasm-compiler-0.5.0-cli.jar
 ```
 
-`souther compile --target <target>` looks for a backend in `$SOUTHER_HOME/backends` first, and then where a package manager installed one. A backend says what it is in `META-INF/souther/backend.properties`. The file has two keys: `name`, the target it answers to, and `souther.version`, the Souther it was built against. The command runs the jar only when `souther.version` is the version of the `souther` command itself. A jar built against another Souther is refused with exit status 2 before anything is compiled. Jars for several Souther versions can sit side by side.
+`souther compile --target <target>` looks for a backend in that directory first, then where a package manager installed one, and fetches one from Maven Central where neither holds it. A backend says what it is in `META-INF/souther/backend.properties`. The file has two keys: `name`, the target it answers to, and `souther.version`, the Souther it was built against. The command runs the jar only when `souther.version` is the version of the `souther` command itself. Jars for several Souther versions can sit side by side, and a jar built against another Souther is never run.
 
 Check that the backend is found:
 
@@ -48,21 +58,31 @@ souther compile --target wasm --help
 souther compile --target wasm — compiles a Souther program to WebAssembly
 
   souther compile --target wasm <source or directory>... -o <file> [--component]
-      [--wit <file>]
+      [--wit <file>] [--component-abi json|typed]
 
   -o <file>     where to write. Required.
   --component   write a component, one interface per Souther module, rather than a
                 core module. A behavior crosses as func(arguments: string) -> string.
   --wit <file>  also write what the program offers, as a reader of interfaces reads
                 it. The same whether a component is written or not.
+  --component-abi json|typed
+                how a component's functions cross, and what --wit writes. json, the
+                default, is the string above, under souther:program. typed takes and
+                answers the types of the model, under souther:typed-program@0.1.0,
+                each module's types an interface of souther:typed-types@0.1.0.
 
-A directory is read for the .sou files under it, in the order their paths sort.
+A directory is read for the .sou files under it, in the order their paths sort; a
+link under it is refused rather than followed. A lone file with no module header is
+named after the file.
 ```
 
-Everything after `--target wasm` belongs to the backend. The `souther` command reads none of it, `--help` included. When no jar is installed, the command says so:
+Everything after `--target wasm` belongs to the backend. The `souther` command reads none of it, `--help` included. When no jar is installed and none can be fetched, the command says where it looked and exits with status 2. With `SOUTHER_BACKEND_OFFLINE` set, which tells it to fetch nothing:
 
 ```text
-no target `wasm` is installed, and no backend is
+no backend for target `wasm` built against Souther 0.5.0 is installed, and none was fetched
+  /home/you/.souther/backends: does not exist
+  Maven Central: not contacted, since SOUTHER_BACKEND_OFFLINE is set
+  `souther backend fetch wasm` downloads it before a compile, on a machine with network access
 ```
 
 To build the backend from a clone instead, run `mvn package` and link the jar it writes. A link rather than a copy means the command runs what the last build wrote.
@@ -141,33 +161,35 @@ Nothing is written unless the whole program compiled. A compile error goes to th
 package root:component;
 
 world program {
-  export souther:program/cart;
-  export souther:decode/cart;
+  export souther:program/%cart;
+  export souther:decode/%cart;
 }
 
 package souther:program {
-  interface cart {
-    record ended { reason: u32 }
-    price: func(arguments: string) -> result<string, ended>;
+  interface %cart {
+    record invalid-answer { behavior: string, issues: string }
+    record ended { reason: u32, invalid-answer: option<invalid-answer> }
+    %price: func(arguments: string) -> result<string, ended>;
   }
 }
 
 package souther:decode {
-  interface cart {
-    record ended { reason: u32 }
-    sku: func(value: string) -> result<string, ended>;
-    line: func(value: string) -> result<string, ended>;
-    membership: func(value: string) -> result<string, ended>;
-    cart: func(value: string) -> result<string, ended>;
-    priced: func(value: string) -> result<string, ended>;
-    empty-cart: func(value: string) -> result<string, ended>;
-    standard: func(value: string) -> result<string, ended>;
-    premium: func(value: string) -> result<string, ended>;
+  interface %cart {
+    record invalid-answer { behavior: string, issues: string }
+    record ended { reason: u32, invalid-answer: option<invalid-answer> }
+    %sku: func(value: string) -> result<string, ended>;
+    %line: func(value: string) -> result<string, ended>;
+    %membership: func(value: string) -> result<string, ended>;
+    %cart: func(value: string) -> result<string, ended>;
+    %priced: func(value: string) -> result<string, ended>;
+    %empty-cart: func(value: string) -> result<string, ended>;
+    %standard: func(value: string) -> result<string, ended>;
+    %premium: func(value: string) -> result<string, ended>;
   }
 }
 ```
 
-`souther:program/cart` holds the behaviors. `souther:decode/cart` holds one function per published type, which reads a JSON value as that type and reports its issues. The `ended` record is a call the runtime ended without a value, with the reason as a number.
+Every name the model gave is written escaped with `%`, because a model may use a word WIT has, such as `record`. A reader of interfaces reads `%cart` as `cart`. `souther:program/cart` holds the behaviors. `souther:decode/cart` holds one function per published type, which reads a JSON value as that type and reports its issues. The `ended` record is a call the runtime ended without a value, with the reason as a number. For reason 13, a function the component imports answered something other than its behavior's type, and `invalid-answer` names that behavior and carries the issues.
 
 To write a component instead of a core module, add `--component`. The component wraps the same core module, and `wasm-tools validate` accepts it.
 
@@ -194,7 +216,7 @@ souther-wasm-bindings cart.wasm -o src/cart.ts
 ```
 
 ```text
-wrote cart.ts from cart.wasm
+wrote src/cart.ts from cart.wasm
 ```
 
 The binding exports one type per declaration, a `Bound` interface and a `load` function. This is the part of `src/cart.ts` a page reads against:
@@ -281,14 +303,14 @@ A core module exports these functions. The listing is `wasm-tools print cart.was
 ```text
 (export "memory" (memory 0))
 (export "__ronto_alloc" (func 2))
-(export "__ronto_alloc_mark" (func 87))
-(export "__ronto_alloc_reset" (func 88))
-(export "__souther_abi_version" (func 89))
-(export "__souther_failure_addr" (func 115))
-(export "__souther_failure_generation" (func 116))
-(export "cabi_realloc" (func 176))
-(export "__souther_decode" (func 271))
-(export "cart.price" (func 270))
+(export "__ronto_alloc_mark" (func 94))
+(export "__ronto_alloc_reset" (func 95))
+(export "__souther_abi_version" (func 96))
+(export "__souther_failure_addr" (func 122))
+(export "__souther_failure_generation" (func 123))
+(export "cabi_realloc" (func 182))
+(export "__souther_decode" (func 277))
+(export "cart.price" (func 276))
 ```
 
 A behavior is exported as `<module>.<behavior>`. Strings cross as a pointer and a length into the exported memory. The host writes the arguments as one JSON array into a buffer from `__ronto_alloc`, calls the export, and reads one JSON object back. The object is `{"value": ...}` or `{"issues": [...]}`.
@@ -332,14 +354,14 @@ The WIT now imports what the program needs beside what it exports:
 
 ```text
 world program {
-  import souther:reached/rates;
-  export souther:program/rates;
-  export souther:decode/rates;
+  import souther:reached/%rates;
+  export souther:program/%rates;
+  export souther:decode/%rates;
 }
 
 package souther:reached {
-  interface rates {
-    today: func(arguments: string) -> string;
+  interface %rates {
+    %today: func(arguments: string) -> string;
   }
 }
 ```

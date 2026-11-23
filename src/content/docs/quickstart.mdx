@@ -87,15 +87,15 @@ This page takes about ten minutes. You write one `.sou` file, run a behavior in 
      claim                    implemented   rows 3    pending 0
        signature   out specified 2/2  observed 2/2  verified 2/2
        partition   axes 1   equivalence partitions 2/2
-       border      borders 2   obligations 4/5
+       border      borders 1   obligations 3/4
          ! no row is at an OUT point (comparison@15:18)
              · read as claim/amount: in 501 < amount
-         · no OFF point is owed at amount = 0 (invariant Amount #1): excluded — the rules leave no value there
-         · no OUT point is owed at amount = 0 (invariant Amount #1): excluded — the rules leave no value there
        branch      2/2
        decision    rules 2   taken 2
        replacement 2/2
-     declarations   obligations 0/1
+     declarations   borders 1   obligations 1/2
+         · no OFF point is owed at value = 0 (invariant Amount #1): excluded — no value can stand there
+         · no OUT point is owed at value = 0 (invariant Amount #1): excluded — no value can stand there
      Amount
          ! no row is at the ON point value = 0 (invariant Amount #1)
 
@@ -104,7 +104,7 @@ This page takes about ten minutes. You write one `.sou` file, run a behavior in 
    2 gaps marked `!`: what a strict build refuses over.
    ```
 
-   The `partition` line says the guard divides the input into two classes, and a row stands in each. The `border` lines list the values each rule places on a boundary. The guard at line 15 has rows on 500 and 501, but no row well past it, and the invariant of `Amount` has no row at 0. The `decision` line says both rules of the body were taken by some row. The `adequacy` line is the verdict over all of this, and the two gaps marked `!` are what `souther examples --strict` refuses the build over. Add a row for `Amount(0)` and one for a value such as `Amount(2000)`, run the report again, and both gaps close.
+   The `partition` line says the guard divides the input into two classes, and a row stands in each. The `border` lines list the values the guard places on its boundary, and the `declarations` lines do the same for the invariant of `Amount`. The guard at line 15 has rows on 500 and 501, but no row well past it, and the invariant of `Amount` has no row at 0. The `decision` line says both rules of the body were taken by some row. The `adequacy` line is the verdict over all of this, and the two gaps marked `!` are what `souther examples --strict` refuses the build over. Add a row for `Amount(0)` and one for a value such as `Amount(2000)`, run the report again, and both gaps close.
 
 4. ### Start a project
 
@@ -130,7 +130,7 @@ This page takes about ten minutes. You write one `.sou` file, run a behavior in 
    ```
 
    ```text
-   [INFO] --- souther:0.1.0:compile (default) @ hello ---
+   [INFO] --- souther:0.2.0:compile (default) @ hello ---
    [INFO]
    [INFO] --- resources:3.4.0:resources (default-resources) @ hello ---
    [INFO] skip non existing resourceDirectory /Users/you/hello/src/main/resources

@@ -35,17 +35,17 @@ The status bar shows the server starting and turns into a check when it is ready
 ## Other editors
 
 Any editor that speaks the Language Server Protocol can run the server over stdio. Where the
-`souther` binary is on the path, start it as a subcommand. It needs no jar path and no stack flag.
+`souther` binary is on the path, start it as a subcommand. It needs no jar path and no JVM flags.
 
 ```sh
 souther lsp
 ```
 
 Every release also attaches `souther-lsp.jar`, a self-contained server for a machine without the
-compiler. It needs Java 25 and a 4 MB thread stack.
+compiler. It needs Java 25, a 4 MB thread stack and compact object headers.
 
 ```sh
-java -Xss4m -jar souther-lsp.jar
+java -Xss4m -XX:+UseCompactObjectHeaders -jar souther-lsp.jar
 ```
 
 Do not copy those values out of prose. Both jars carry `META-INF/souther/tooling.json`, which
@@ -59,7 +59,7 @@ souther tooling
 
 ```json
 {
-  "compilerVersion": "0.4.0",
+  "compilerVersion": "0.5.0",
   "language": {
     "id": "souther",
     "extensions": [".sou"]
@@ -67,7 +67,7 @@ souther tooling
   "runtime": {
     "java": {
       "minimumFeature": 25,
-      "requiredJvmArgs": ["-Xss4m"]
+      "requiredJvmArgs": ["-Xss4m", "-XX:+UseCompactObjectHeaders"]
     }
   },
   "contracts": {

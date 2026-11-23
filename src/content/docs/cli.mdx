@@ -28,6 +28,7 @@ usage: souther <command> [options] [args]
 commands:
   init      start a project, or add Souther to one
   compile   compile to .class files, or for an installed target
+  backend   fetch a target's backend from Maven Central, ahead of a compile
   run       run one behavior and print its output
   fmt       format source, to stdout or in place
   examples  how well the `example`s cover the model
@@ -39,6 +40,8 @@ commands:
   tooling   what an editor needs to start and configure the server, as JSON
   help      what a command takes, and what its options mean
   version   which Souther this is
+
+`souther help <command>` writes what one command takes, and `souther doc cli/commands` writes the whole of it.
 ```
 
 Five options are shared. `--help` and `--version` work on every command. The other three work on
@@ -67,9 +70,9 @@ souther init [options] [<groupId>:<artifactId>]
 
 | Option | Meaning |
 | --- | --- |
-| `-d, --dir <path>` | Where to write the project. Default: the artifactId. |
+| `-d, --dir <path>` | Where to write the project. Default: the artifactId, or here when adding. |
 | `--build maven\|gradle\|none` | Which build file to write. Default `maven`. |
-| `--model none\|minimal\|full` | How much of a model to start with. Default `full` when creating. |
+| `--model none\|minimal\|full` | How much of a model to start with. Default `full` when creating, `none` when adding. |
 | `--module <name>` | The `.sou` module header. Default: the coordinate. |
 
 The command is never interactive and never overwrites a file. A second run writes what the first
@@ -108,13 +111,15 @@ souther init --build none
              module rules
 
     souther compile --target <target> <arguments>...
+
+    `<target>` and what follows it are an installed backend's own; `souther help compile` says how they are written.
 ```
 
 `compile`, `run`, `fmt` and `examples` read the nearest `.souther-version` above the working
 directory. Under one that names another Souther they refuse to run and exit with `2`.
 
 ```text
-`<path>/.souther-version` requires Souther 0.9.9, and this is Souther 0.4.0
+`<path>/.souther-version` requires Souther 0.9.9, and this is Souther 0.5.0
 ```
 
 The message prints the file's absolute path.
@@ -182,15 +187,22 @@ souther compile --target wasm --help
 souther compile --target wasm — compiles a Souther program to WebAssembly
 
   souther compile --target wasm <source or directory>... -o <file> [--component]
-      [--wit <file>]
+      [--wit <file>] [--component-abi json|typed]
 
   -o <file>     where to write. Required.
   --component   write a component, one interface per Souther module, rather than a
                 core module. A behavior crosses as func(arguments: string) -> string.
   --wit <file>  also write what the program offers, as a reader of interfaces reads
                 it. The same whether a component is written or not.
+  --component-abi json|typed
+                how a component's functions cross, and what --wit writes. json, the
+                default, is the string above, under souther:program. typed takes and
+                answers the types of the model, under souther:typed-program@0.1.0,
+                each module's types an interface of souther:typed-types@0.1.0.
 
-A directory is read for the .sou files under it, in the order their paths sort.
+A directory is read for the .sou files under it, in the order their paths sort; a
+link under it is refused rather than followed. A lone file with no module header is
+named after the file.
 ```
 
 A backend is an executable jar, or a link to one, under `$SOUTHER_HOME/backends`. A package
@@ -198,14 +210,19 @@ manager's launcher can name another directory with `-Dsouther.backends`. Each ja
 `META-INF/souther/backend.properties` with two keys. `name` is the target the jar answers to.
 `souther.version` is the Souther it was built against, and it must equal the version of the
 `souther` that is running. Jars for several Souther versions can sit side by side. Two jars with
-the same pair in one directory are refused. A target that is not installed exits with `2`.
+the same pair in one directory are refused. Where no directory holds the pair, the backend is
+fetched from Maven Central, as `souther backend fetch` does, and then run. Setting
+`SOUTHER_BACKEND_OFFLINE` to a non-empty value stops a compile from fetching. A target that is
+neither installed nor fetched exits with `2`.
 
 ```sh
 souther compile --target nope rules.sou
 ```
 
 ```text
-no target `nope` is installed; installed: wasm
+no backend for target `nope` built against Souther 0.5.0 is installed, and none was fetched
+  /home/you/.souther/backends: contains backends for wasm only
+  Maven Central: not contacted, since no artifact is known for target `nope`
 ```
 
 The backend runs as a process of its own under the same `java`, with the JVM arguments
@@ -217,6 +234,28 @@ writes a class-data archive under `~/.cache/souther`, named for the version, and
 start from it. The directory honors `XDG_CACHE_HOME`. Deleting the archive costs one slower compile.
 An archive belongs to the binary and the JDK that wrote it, so delete it after replacing either.
 </Aside>
+
+## backend
+
+Fetches a target's backend from Maven Central and compiles nothing.
+
+```sh
+souther backend fetch <target>
+```
+
+It takes the newest release of the backend that was built against the running Souther, and writes
+it to `$SOUTHER_HOME/backends`, or `~/.souther/backends`, as `<target>-<version>.jar`. It is for a
+machine that will not reach the network when it compiles, and for taking a release newer than the
+one fetched before. A release already fetched and still in place is not fetched again. A jar under
+that name that no fetch wrote is left alone, and the fetch is refused.
+
+```sh
+souther backend fetch wasm
+```
+
+A target Maven Central does not release, `jvm` among them, exits with `2`, as does a fetch that
+finds no release built against this Souther or cannot reach the repository. The command is not held
+to `.souther-version`, since what it fetches is for the Souther that runs it.
 
 ## run
 
@@ -246,7 +285,8 @@ Without `--behavior`, a module with exactly one runnable behavior runs it. With 
 stops with exit `2` and lists them.
 
 ```text
-several behaviors can be run — pick one with --behavior: double, triple
+several behaviors can be run with `run` — pick one with --behavior: double, triple
+usage: souther run <file.sou> [-cp <path>] [--behavior <name>] [--input <json>]
 ```
 
 How `--input` is written depends on how many parameters the behavior takes.
@@ -282,8 +322,12 @@ souther run src/main/souther/hello.sou --input '["", "2026-04-01", 14, "2026-04-
 
 An array of the wrong length stops the run with exit `1`.
 
+```sh
+souther run src/main/souther/hello.sou --input '["", "2026-04-01", 14]'
+```
+
 ```text
-`returnBook` takes 4 inputs — --input must be a JSON array of that length
+`returnBook` takes 4 inputs, but --input has 3
 ```
 
 A file that imports another user module needs `-cp`. Compile that module first and name the
@@ -309,7 +353,8 @@ souther examples [options] <file.sou>...
 | `--behavior <name>` | Report only this behavior. |
 | `--module <name>` | Report only this module. |
 | `--generate` | Print example rows for what nothing covers, with the answers left blank. |
-| `--strict` | Exit non-zero on a gap the report marks. |
+| `--strict` | Exit non-zero on a gap the report marks, or on a behavior it leaves unmeasured. |
+| `--to-the-end` | Measure as written a behavior the report would leave unmeasured. |
 | `-cp, --class-path <path>` | Where to find modules another project compiled. |
 | `--format human\|json` | How to render the report. |
 
@@ -348,9 +393,8 @@ shop.discount                                            measurement: complete
   discountFor              implemented   rows 2    pending 0
                 in #1 specified 2/2
     partition   axes 2   equivalence partitions 4/4
-    combination pairs 2 covered, 2 uncovered
-      ! no row is in `amount/x < 10000` at discountFor/amount with `Member` at discountFor/customer
-      ! no row is in `amount/10000 <= x` at discountFor/amount with `Guest` at discountFor/customer
+    combination pairs 1 covered, 1 uncovered
+      ! no row is in `amount: x < 10000` at discountFor/amount with `Member` at discountFor/customer
     border      borders 1   obligations 1/4
       ! no row is at the OFF point (comparison@15:31)
           · read as discountFor/amount: = 9999
@@ -368,7 +412,7 @@ shop.discount                                            measurement: complete
 
 1 behavior: 1 implemented, 0 unimplemented, 0 injected; 0 rows waiting for a `let`.
 adequacy: not satisfied
-7 gaps marked `!`: what a strict build refuses over.
+6 gaps marked `!`: what a strict build refuses over.
 ```
 
 Read the report from the top. The first line names the module and says how much of the measuring
@@ -384,8 +428,9 @@ is one path through the arms and comparisons. `replacement` asks whether any row
 differently if an arm were rewritten as a sibling arm. A gap on that line is warning `E1939`, and
 `souther doc E1939` explains it.
 
-A line under `!` is a gap. `--strict` exits with `1` over exactly those, and `souther compile
---adequacy all --warnings error` refuses the same set. A line under `·` is something measured and
+A line under `!` is a gap. `--strict` exits with `1` over those, and `souther compile
+--adequacy all --warnings error` refuses the same set. `--strict` also exits with `1` on a behavior
+the report leaves unmeasured, described below. A line under `·` is something measured and
 named but not refused over, such as a hint on how to read a border or a position the rules divide no
 way.
 
@@ -396,12 +441,19 @@ measure that could find a gap could not be made, and the report then lists what 
 position open and whether a wider search or only a new row would close it. A limit of the compiler
 is never reported as an answer about the model.
 
+A behavior is left unmeasured when measuring it as written would stop at a limit of the compiler's
+own, in a condition the compiler can say how to change. The report names the limit and what to
+declare as a behavior, and measures every other behavior. `--to-the-end` measures such a behavior
+as it is written.
+
 A model with injected behaviors adds two things. An injected behavior has no body, so most measures
 are `not applicable`. A `declarations` block at the end lists the invariants of the types the
 behaviors construct, and each invariant is owed a row at its border.
 
 ```text
-  declarations   obligations 1/2
+  declarations   borders 1   obligations 1/2
+      · no OFF point is owed at String.length(value) = 1 (invariant Sku #1): excluded — no value can stand there
+      · no OUT point is owed at String.length(value) = 1 (invariant Sku #1): excluded — no value can stand there
   Sku
       ! no row is at the ON point String.length(value) = 1 (invariant Sku #1)
 
@@ -417,19 +469,25 @@ souther examples discount.sou --generate
 ```
 
 ```text
-// generated by `souther examples --generate`: 4 rows to fill what nothing covers.
+// generated by `souther examples --generate`: 3 rows to fill what nothing covers.
 // Replace each `<?>` with what the system actually answers.
 example discountFor
-// fills else
-// fills amount=x < 10000
-// fills customer=Member
+// fills else (15:21)
+// fills Member at customer
+// fills amount: x < 10000 at amount
+// fills a decision rule (it goes through `case Member` (14:5); the comparison at 15:31 does not hold)
+// fills OFF point of comparison@discount.sou:15:31
     | (Member, 9999)  -> <?>
-// fills amount=10000 <= x
-// fills customer=Guest
-    | (Guest, 10000)  -> <?>
+// fills IN point of comparison@discount.sou:15:31
     | (Member, 10001) -> <?>
+// fills OUT point of comparison@discount.sou:15:31
     | (Member, 9998)  -> <?>
 ```
+
+Where a behavior calls another, `--generate` also offers rows that try the inputs of the callee's
+rows in the caller. These owe nothing. The header counts them apart as optional rows, and a comment
+over each says `suggested input; no uncovered obligation`. Whether the model is covered is the
+`adequacy` line's answer, not the number of rows generated.
 
 `--strict` is the form a build takes. The report is the same. Only the exit code changes.
 
@@ -438,7 +496,7 @@ souther examples discount.sou --strict
 ```
 
 ```text
-7 gap(s) marked `!` above: the rows do not cover the model.
+6 gap(s) marked `!` above: the rows do not cover the model.
 ```
 
 `--format json` prints the same report as one JSON document with a `schemaVersion`. Every finding
@@ -503,6 +561,7 @@ cli/start-here	Start here
 cli/commands	The `souther` command
 cli/commands/init	  init
 cli/commands/compile	  compile
+cli/commands/backend	  backend
 cli/commands/project-version	  .souther-version
 cli/commands/run	  run
 cli/commands/fmt	  fmt
@@ -657,7 +716,7 @@ souther tooling
 
 ```json
 {
-  "compilerVersion": "0.4.0",
+  "compilerVersion": "0.5.0",
   "language": {
     "id": "souther",
     "extensions": [".sou"]
@@ -665,7 +724,7 @@ souther tooling
   "runtime": {
     "java": {
       "minimumFeature": 25,
-      "requiredJvmArgs": ["-Xss4m"]
+      "requiredJvmArgs": ["-Xss4m", "-XX:+UseCompactObjectHeaders"]
     }
   },
   "contracts": {
@@ -692,7 +751,7 @@ souther version
 ```
 
 ```text
-souther 0.4.0
+souther 0.5.0
 ```
 
 `souther --version` and `--version` after any command print the same line. The version is read
