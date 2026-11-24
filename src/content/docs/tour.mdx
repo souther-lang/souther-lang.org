@@ -491,6 +491,10 @@ quote                                                    measurement: complete
       ! no row is at an IN point (comparison@15:48)
           · read as quote/List.length(cart.items): in 1 < List.length(cart.items)
       · no OUT point is owed at List.length(cart.items) = 0 (comparison@15:48): excluded — no value can stand there
+    stops       may stop 0   not resolved 3
+      · stop not resolved: 18:47; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at what is worked out at 18:47
+      · stop not resolved: 18:49; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at the call of currentPrice at 18:49; currentPrice has no body in the model to read
+      · stop not resolved: 19:16; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at what is worked out at 19:16
     branch      2/2
     decision    rules 2   taken 2
     replacement 2/4

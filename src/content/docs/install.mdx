@@ -57,7 +57,7 @@ scoop bucket add souther https://github.com/souther-lang/scoop-souther
 scoop install souther
 ```
 
-Scoop installs the Windows archive that carries its own Java runtime, so no JDK is needed to compile or run a model. The one exception is `souther japi`, which reads javadoc through a compiler and needs a JDK on the machine.
+Scoop installs the Windows archive that carries its own Java runtime, so no JDK is needed on the machine. The runtime includes the Java compiler, so `souther japi` works as well.
 
 Use Scoop or `install.ps1`, not both. Each owns its own `PATH` entry.
 
