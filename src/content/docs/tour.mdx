@@ -6,7 +6,7 @@ sidebar:
 ---
 
 This tour walks through the whole of Souther on one page, from a source file to the module
-boundary. Every snippet compiles with the 0.4.0 compiler as written, and every output shown is what
+boundary. Every snippet compiles with the 0.5.0 compiler as written, and every output shown is what
 the command printed.
 
 ## A source file
@@ -33,7 +33,7 @@ A comment starts at `//` and ends with the line. There is no block comment.
 
 Standard library functions are always reachable through their qualifier, such as `List.map`. An
 `import` line lets you write a name without the qualifier, and nothing else. An imported name you
-never use is a compile error, E1922.
+never use draws a compile warning, E1922.
 
 ## Built-in types
 
@@ -465,7 +465,8 @@ Hint: two apples -> a priced cart
 A `fake` stands in for an injected dependency while the rows run. It is a table from input to
 output, matched by value, with `_` as the default row. A fake is never compiled into the output.
 `souther examples` reads the same rows and reports what they leave untested: output cases no row
-expects, partitions of the input no row is in, and borders no row sits on.
+expects, partitions of the input no row is in, borders no row sits on, and changes to the body that
+no row would notice.
 
 ```sh
 souther examples quote.sou
@@ -485,19 +486,24 @@ quote                                                    measurement: complete
     partition   axes 2   equivalence partitions 4/4
       · divided no way: cart.items[*].sku
       · divided no way: cart.items[*].quantity
-    combination pairs 3 covered, 1 uncovered
-      ! no row is in `List.length(cart.items)/0 <= x <= 0` at quote/List.length(cart.items) with `false` at quote/cart.open
+    combination pairs 2/2
     border      borders 1   obligations 2/3
       ! no row is at an IN point (comparison@15:48)
           · read as quote/List.length(cart.items): in 1 < List.length(cart.items)
-      · no OUT point is owed at List.length(cart.items) = 0 (comparison@15:48): excluded — the rules leave no value there
+      · no OUT point is owed at List.length(cart.items) = 0 (comparison@15:48): excluded — no value can stand there
+    stops       may stop 0   not resolved 3
+      · stop not resolved: 18:47; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at what is worked out at 18:47
+      · stop not resolved: 18:49; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at the call of currentPrice at 18:49; currentPrice has no body in the model to read
+      · stop not resolved: 19:16; whether a run stops in something it works out is not determined: it is none of the operations this compiler tells apart; a run may stop at what is worked out at 19:16
     branch      2/2
     decision    rules 2   taken 2
-    replacement 2/2
+    replacement 2/4
+      ! no row would come out differently if the fold in `souther.list.map` this build holds no source of stopped after its first element
+      ! no row would come out differently if the fold in `souther.list.map` this build holds no source of handed each step the seed in place of what the step before it answered
 
 2 behaviors: 1 implemented, 0 unimplemented, 1 injected; 0 rows waiting for a `let`.
 adequacy: not satisfied
-2 gaps marked `!`: what a strict build refuses over.
+3 gaps marked `!`: what a strict build refuses over.
 ```
 
 ## Modules and the boundary
